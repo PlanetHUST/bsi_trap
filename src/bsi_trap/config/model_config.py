@@ -13,7 +13,8 @@ class ModelConfig:
     agn_lifetime_myr: float = 10.0
     alpha: float = 0.01
     disk_resolution: int = 256
-    migrator_mass_msun: float = 10.0
+    parallel_seed: float
+    pair_up_seed: float
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

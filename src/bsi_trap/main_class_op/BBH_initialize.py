@@ -4,12 +4,13 @@ from bsi_trap.classes.classes import (
     AGN_properties,
     DiskProfile,
 )
+from bsi_trap.config.model_config import ModelConfig
 
 
 def BBH_params_initialize(
-    bbh: BBH_properties,
-    sbh: single_BH_properties,
-    agn: AGN_properties,
+    model_config: ModelConfig,
     disk: DiskProfile,
+    bbh: BBH_properties,
 ):
+    """random initialize {a,e,chi} for bbh"""
     pass

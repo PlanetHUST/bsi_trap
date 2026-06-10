@@ -9,20 +9,17 @@ import numpy as np
 from bsi_trap.classes import (
     AGN_properties,
     BBH_properties,
-    Embedded_BH,
     DiskProfile,
     BBHEvolverParams,
     single_BH_properties,
 )
 
 from bsi_trap.config.model_config import ModelConfig
-from bsi_trap.constant import constant as const
 from bsi_trap.main_class_op.embedded_BH_initialize import embedded_BH_initialize
 from bsi_trap.main_class_op.class_convert import embedded_to_BBH, BBH_to_ngen
 from bsi_trap.disk_profile.migration_torque import find_traps
 from bsi_trap.disk_profile.pagn_disk_adapter import build_pagn_disk_profile
-from bsi_trap.storage.contract import HDF5Contract
-from bsi_trap.storage.save_gen import save_generation_to_file
+from bsi_trap.main_class_op.BBH_initialize import BBH_params_initialize
 
 
 @dataclass(frozen=True)
@@ -77,10 +74,13 @@ def initialize_to_trap(
 ) -> Tuple[BBH_properties, single_BH_properties, BBH_properties, single_BH_properties]:
 
     # 1. initialize embedded BH properties
-    eBH = embedded_BH_initialize(agn, disk, model_config)
+    ebh = embedded_BH_initialize(agn, disk, model_config)
 
     # 2. embedded BH to BBHs in trap
-    bbh_1g, sbh_1g = embedded_to_BBH()
+    bbh_1g, sbh_1g = embedded_to_BBH(model_config, agn, disk, ebh)
+
+    # random parameter filling (a,e,chi)
+    BBH_params_initialize(model_config, disk, bbh_1g)
 
     # 3. hierarchical mergers
     bbh_ng, sbh_ng = BBH_to_ngen()

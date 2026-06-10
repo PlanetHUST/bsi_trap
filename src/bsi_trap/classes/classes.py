@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 from dataclasses import dataclass
 
@@ -11,6 +12,7 @@ class AGN_properties(object):
         self.M_SMBH_msun = M_SMBH_msun
         self.alpha = None
         self.lifetime_myr = lifetime_myr
+        self.mave_msun = float
         self.disk_profile = None
         self.torque_profile = None
 
@@ -105,7 +107,22 @@ class Embedded_BH(object):
     def __init__(self, num):
         self.num = num
         self.m_msun = np.zeros(num, float)
+        self.t_form_s = np.zeros(num, float)
+        self.t_ini_s = np.zeros(num, float)
         self.R_cm = np.zeros(num, float)
+        self.trap_flag = np.zeros(
+            num, int
+        )  # -1: trap not reach; -2: single stars; 0-num: binary pair-up with index
+
+    def init_ebh(self, m_msun, t_form_s, R_cm):
+        if len(m_msun) == len(t_form_s) == len(R_cm) == self.num:
+            self.m_msun = m_msun
+            self.t_form_s = t_form_s
+            self.R_cm = R_cm
+        else:
+            logging.error(
+                f"unmatched length of variable with len(m_msun)={len(m_msun)}; len(t_form_s)={len(t_form_s)}; len(R_cm)={len(R_cm)}; num = {self.num}"
+            )
 
 
 class BBH_properties(object):
@@ -135,7 +152,9 @@ class BBH_properties(object):
         self.chimerg = self.chirem
         self.vk_cgs = np.zeros(num, float)  # kick velocity
 
-        self.t_form_s = np.zeros(num, float)
+        self.t_ini_s = np.zeros(num, float)
+        self.t_del_s = np.zeros(num, float)
+        self.bbh_flag = None
 
 
 class single_BH_properties(object):
@@ -143,21 +162,8 @@ class single_BH_properties(object):
 
     def __init__(self, num):
         self.num = num
-        self.m3_msun = np.zeros(num, float)
-        self.v3_cgs = np.zeros(num, float)
-
-
-class stellar_properties:
-    """Stellar/remnant reservoir used before disk embedding."""
-
-    def __init__(self, num):
-        self.idi = np.zeros(num, int)
-        self.m = np.zeros(num, float)
-        self.mBH = np.zeros(num, float)
-        self.a = np.zeros(num, float)
-        self.ecc = np.zeros(num, float)
-        self.cosw = np.zeros(num, float)
-        self.i = np.zeros(num, float)
+        self.m_msun = np.zeros(num, float)
+        self.t_ini_s = np.zeros(num, float)
 
 
 class BBHEvolverParams:
@@ -185,7 +191,7 @@ class BBHEvolverParams:
         self.trap_bsi_context = None  # To store local conditions for BSI calculations
 
 
-class merger_flags:
+class bbh_flags:
     def __init__(self, num):
         self.merger_flag = np.zeros(num, int)  # 1 if merger occurred, 0 otherwise
         self.GWescape_flag = np.zeros(num, int)
