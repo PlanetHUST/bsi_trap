@@ -1,18 +1,18 @@
 import numpy as np
 from dataclasses import dataclass
 
-
 ######### Environment Global Parameters ##########
+
 
 class AGN_properties(object):
     "AGN disk profile"
 
     def __init__(self, M_SMBH_msun, lifetime_myr):
         self.M_SMBH_msun = M_SMBH_msun
-        self.M_SMBH = M_SMBH_msun
         self.alpha = None
         self.lifetime_myr = lifetime_myr
-        self.AGNlifetime = lifetime_myr
+        self.disk_profile = None
+        self.torque_profile = None
 
 
 @dataclass(frozen=True)
@@ -25,7 +25,7 @@ class DiskProfile:
     r_out_cm: float
     r_trap_cm: float
     r_antitrap_cm: float
-    
+
     def __post_init__(self):
         if self.radius_cm.size == 0:
             raise ValueError("DiskProfile.radius_cm must not be empty")
@@ -68,7 +68,9 @@ class DiskProfile:
     def get_cs(self, r_cm: float) -> float:
         return float(self.cs_cgs[self.closest_index(r_cm)])
 
+
 ############ Torque Profile #############
+
 
 @dataclass
 class TorqueProfile:
@@ -96,6 +98,16 @@ class TorqueProfile:
 
 ########## BH Dynamics Classes ############
 
+
+class Embedded_BH(object):
+    """embedded BHs in in the disk"""
+
+    def __init__(self, num):
+        self.num = num
+        self.m_msun = np.zeros(num, float)
+        self.R_cm = np.zeros(num, float)
+
+
 class BBH_properties(object):
     """BBH population in the trap"""
 
@@ -103,14 +115,9 @@ class BBH_properties(object):
         self.num = num
         self.idi = np.zeros(num, int)
         self.m1_msun = np.zeros(num, float)
-        self.m2_msun= np.zeros(num, float)
-        self.m1 = self.m1_msun
-        self.m2 = self.m2_msun
+        self.m2_msun = np.zeros(num, float)
         self.sma_cm = np.zeros(num, float)
-        self.sma = self.sma_cm
-        self.sma2 = np.zeros(num, float)
         self.ecc = np.zeros(num, float)
-        self.ecc2 = np.zeros(num, float)
 
         self.ecc10 = np.zeros(num, float)  # eccentricity at fGW=10 Hz
         self.ecc0p1 = np.zeros(num, float)  # eccentricity at fGW=0.1 Hz
@@ -121,21 +128,23 @@ class BBH_properties(object):
         self.th2 = np.zeros(num, float)
 
         self.A_cm = np.zeros(num, float)  # outer orbital semimajor axis in cm
-        self.A = self.A_cm
 
         self.mrem_msun = np.zeros(num, float)  # mass of merger remnant
         self.mmerg = self.mrem_msun
         self.chirem = np.zeros(num, float)
         self.chimerg = self.chirem
         self.vk_cgs = np.zeros(num, float)  # kick velocity
-        self.vk = self.vk_cgs
+
+        self.t_form_s = np.zeros(num, float)
 
 
 class single_BH_properties(object):
     "single BH population properties in the trap"
 
-    def __init__(self):
-        pass
+    def __init__(self, num):
+        self.num = num
+        self.m3_msun = np.zeros(num, float)
+        self.v3_cgs = np.zeros(num, float)
 
 
 class stellar_properties:
@@ -151,7 +160,7 @@ class stellar_properties:
         self.i = np.zeros(num, float)
 
 
-class BBHEvolver:
+class BBHEvolverParams:
     "BBH evolution class for simulation parameters"
 
     def __init__(self, rlist, sigmalist, hlist, cslist):
@@ -162,7 +171,9 @@ class BBHEvolver:
 
         # Parameters for weak BSI
         self.bsi_eta_weak = 2.0  # Maximum impact parameter in units of a for weak BSI
-        self.bsi_eta_strong = 0.5  # Maximum impact parameter in units of a for strong BSI
+        self.bsi_eta_strong = (
+            0.5  # Maximum impact parameter in units of a for strong BSI
+        )
         self.bsi_sigma_e0 = 0.1  # Base eccentricity change for weak BSI
 
         # Eccentricity limits to avoid unphysical values
@@ -172,6 +183,7 @@ class BBHEvolver:
         self.tol_e = 1.0e-3
 
         self.trap_bsi_context = None  # To store local conditions for BSI calculations
+
 
 class merger_flags:
     def __init__(self, num):
@@ -194,3 +206,8 @@ class MigrationParameters:
     hydrogen_fraction: float = 0.7
     kappa_t: float = 20.0
     kappa_norm: float = 25.0
+
+
+class TrapContext:
+    def __ini__(self):
+        pass

@@ -1,9 +1,13 @@
 import numpy as np
 from typing import Optional, Tuple
 
-from bsi_trap.classes import MigrationParameters, TorqueProfile
+from bsi_trap.classes import MigrationParameters, TorqueProfile, TrapSelection
 from bsi_trap.disk_profile.pagn_get import constant, require_pagn_bits
-from bsi_trap.disk_profile.disk_numeric import sorted_disk_view, radial_log_slope, safe_divide
+from bsi_trap.disk_profile.disk_numeric import (
+    sorted_disk_view,
+    radial_log_slope,
+    safe_divide,
+)
 
 
 def total_pressure(disk):
@@ -104,6 +108,12 @@ def compute_torque_profile(
     smoothing: float = 0.005,
     params: Optional[MigrationParameters] = None,
 ) -> TorqueProfile:
+    if not np.isfinite(migrator_mass_msun) or migrator_mass_msun <= 0.0:
+        raise ValueError("migrator_mass_msun must be positive and finite")
+    if not np.isfinite(z):
+        raise ValueError("z must be finite")
+    if smoothing < 0.0:
+        raise ValueError("smoothing must be non-negative")
 
     if params is None:
         params = MigrationParameters()
@@ -207,11 +217,15 @@ def find_torque_zero_crossings(radius: np.ndarray, gamma_tot: np.ndarray) -> np.
     return np.asarray(roots, dtype=float)
 
 
-def find_stable_traps(
+def classify_torque_crossings(
     torque_profile: TorqueProfile,
-    *,
-    require_negative_to_positive: bool = False,
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return stable trap and anti-trap radii in cm.
+
+    A positive-to-negative torque crossing is stable: objects inside migrate
+    outward and objects outside migrate inward. The opposite crossing is an
+    anti-trap.
+    """
     r = np.asarray(torque_profile.radius_cm, dtype=float)
     g = np.asarray(torque_profile.gamma_tot, dtype=float)
 
@@ -219,38 +233,94 @@ def find_stable_traps(
     r = r[finite]
     g = g[finite]
     if g.size < 2:
-        return np.array([], dtype=float)
+        empty = np.array([], dtype=float)
+        return empty, empty
 
     order = np.argsort(r)
     r = r[order]
     g = g[order]
 
-    stable_roots = []
+    trap_radii = []
+    antitrap_radii = []
+
     for i in np.where(np.sign(g[1:]) != np.sign(g[:-1]))[0]:
         g_left = g[i]
         g_right = g[i + 1]
-        if require_negative_to_positive:
-            stable = g_left < 0.0 and g_right > 0.0
-        else:
-            stable = g_left > 0.0 and g_right < 0.0
-        if stable:
-            r0, r1 = r[i], r[i + 1]
-            root = r0 - g_left * (r1 - r0) / (g_right - g_left)
-            stable_roots.append(root)
+        r0, r1 = r[i], r[i + 1]
+        root = r0 - g_left * (r1 - r0) / (g_right - g_left)
 
-    return np.asarray(stable_roots, dtype=float)
+        if g_left > 0.0 and g_right < 0.0:
+            trap_radii.append(root)
+        elif g_left < 0.0 and g_right > 0.0:
+            antitrap_radii.append(root)
+
+    return (
+        np.asarray(trap_radii, dtype=float),
+        np.asarray(antitrap_radii, dtype=float),
+    )
 
 
-def choose_outermost_stable_trap(
-    trap_radii_cm: np.ndarray,
-    *,
-    fallback_radius_cm: float,
+def _finite_profile_radii(torque_profile: TorqueProfile) -> np.ndarray:
+    radii = np.asarray(torque_profile.radius_cm, dtype=float)
+    return radii[np.isfinite(radii) & (radii > 0.0)]
+
+
+def _select_fallback_radius(
+    torque_profile: TorqueProfile,
+    fallback_radius_cm: Optional[float],
 ) -> float:
-    trap_radii_cm = np.asarray(trap_radii_cm, dtype=float)
-    trap_radii_cm = trap_radii_cm[np.isfinite(trap_radii_cm) & (trap_radii_cm > 0.0)]
-    if trap_radii_cm.size == 0:
-        return float(fallback_radius_cm)
-    return float(np.max(trap_radii_cm))
+    finite_radii = _finite_profile_radii(torque_profile)
+    if finite_radii.size == 0:
+        raise ValueError("torque profile has no positive finite radii")
+
+    if fallback_radius_cm is None:
+        return float(np.median(finite_radii))
+
+    fallback = float(fallback_radius_cm)
+    if (
+        not np.isfinite(fallback)
+        or fallback <= 0.0
+        or fallback < np.min(finite_radii)
+        or fallback > np.max(finite_radii)
+    ):
+        return float(np.median(finite_radii))
+    return fallback
+
+
+def find_traps(
+    disk,
+    *,
+    migrator_mass_msun: float = 10.0,
+    smoothing: float = 0.005,
+    params: Optional[MigrationParameters] = None,
+    fallback_radius_cm: Optional[float] = None,
+) -> TrapSelection:
+    """Compute the torque profile and select the trap used by the workflow."""
+    torque_profile = compute_torque_profile(
+        disk,
+        migrator_mass_msun=migrator_mass_msun,
+        smoothing=smoothing,
+        params=params,
+    )
+    trap_radii, antitrap_radii = classify_torque_crossings(torque_profile)
+    fallback = _select_fallback_radius(torque_profile, fallback_radius_cm)
+    fallback_used = trap_radii.size == 0
+    r_trap = fallback if fallback_used else float(np.max(trap_radii))
+
+    if antitrap_radii.size == 0:
+        r_antitrap = r_trap
+    else:
+        nearest = np.argmin(np.abs(antitrap_radii - r_trap))
+        r_antitrap = float(antitrap_radii[nearest])
+
+    return TrapSelection(
+        r_trap_cm=r_trap,
+        r_antitrap_cm=r_antitrap,
+        trap_radii_cm=trap_radii,
+        antitrap_radii_cm=antitrap_radii,
+        fallback_used=fallback_used,
+        torque_profile=torque_profile,
+    )
 
 
 def find_outermost_stable_trap(
@@ -261,29 +331,16 @@ def find_outermost_stable_trap(
     params: Optional[MigrationParameters] = None,
     fallback_radius_cm: Optional[float] = None,
 ) -> Tuple[float, np.ndarray, TorqueProfile]:
-    torque_profile = compute_torque_profile(
+    """Compatibility wrapper returning the historical three-value result."""
+    selection = find_traps(
         disk,
         migrator_mass_msun=migrator_mass_msun,
         smoothing=smoothing,
         params=params,
+        fallback_radius_cm=fallback_radius_cm,
     )
-    trap_radii = find_stable_traps(torque_profile)
-
-    finite_radius = torque_profile.radius_cm[
-        np.isfinite(torque_profile.radius_cm) & (torque_profile.radius_cm > 0.0)
-    ]
-    if finite_radius.size == 0:
-        raise ValueError("torque profile has no positive finite radii")
-
-    if fallback_radius_cm is None:
-        fallback = float(np.median(finite_radius))
-    else:
-        fallback = float(fallback_radius_cm)
-        if fallback < np.nanmin(finite_radius) or fallback > np.nanmax(finite_radius):
-            fallback = float(np.median(finite_radius))
-
-    rtrap = choose_outermost_stable_trap(
-        trap_radii,
-        fallback_radius_cm=fallback,
+    return (
+        selection.r_trap_cm,
+        selection.trap_radii_cm,
+        selection.torque_profile,
     )
-    return rtrap, trap_radii, torque_profile

@@ -3,13 +3,16 @@ import numpy as np
 import bsi_trap.constant.constant as const
 from bsi_trap.classes.classes import AGN_properties, DiskProfile
 
+
 def frequency_from_sma(m1, m2, a):
     """Compute the gravitational wave frequency (Hz) from the semi-major axis."""
     return 1.0 / np.pi * np.sqrt(const.G * (m1 + m2) / a**3)
 
+
 def threshold_radius(m1, m2):
     """Compute the threshold radius for merger (6 GM/c^2)."""
     return 6 * const.G * (m1 + m2) / const.c**2
+
 
 def compute_merger_time_estimate(m1, m2, a, e):
     """Approximate merger time (Peters 1964)"""

@@ -1,7 +1,7 @@
 import numpy as np
 
 from bsi_trap.functions.random_sample import semimajor, ecc, secondary, spin
-from bsi_trap.initialize.embedded_BH_initialize import assign_spin_tilts
+from bsi_trap.main_class_op.embedded_BH_initialize import assign_spin_tilts
 
 
 def initialize_nthgen(BBH, AGN, max1g, gf, type):

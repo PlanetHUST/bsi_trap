@@ -80,7 +80,3 @@ class HDF5Contract:
             return None
 
         return int(suffix)
-
-
-# Backward compatibility
-StorageContract = HDF5Contract

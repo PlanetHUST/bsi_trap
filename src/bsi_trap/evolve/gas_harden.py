@@ -2,40 +2,70 @@
 import numpy as np
 
 from bsi_trap.evolve.gw import ode_gw_only
-from bsi_trap.classes.classes import BBHEvolver, DiskProfile, AGN_properties
-from bsi_trap.evolve.numeric import _safe_sma, _safe_eccentricity, _is_physical_state, para_evo
+from bsi_trap.classes.classes import (
+    BBHEvolver,
+    BBH_properties,
+    DiskProfile,
+    AGN_properties,
+)
+from bsi_trap.evolve.numeric import (
+    _safe_sma,
+    _safe_eccentricity,
+    _is_physical_state,
+    para_evo,
+)
 
 import bsi_trap.constant.constant as const
 from bsi_trap.evolve import bsi
 from bsi_trap.evolve import physical_quantity as pq
 from bsi_trap.evolve import stop_conditions as stop_cond
 
-Evolparams = BBHEvolver(rlist=None, sigmalist=None, hlist=None, cslist=None)
 
+def ode_with_gas(
+    Evolparams: BBHEvolver,
+    m1_g: float,
+    m2_g: float,
+    a_cm: float,
+    e: float,
+    *,
+    AGN: AGN_properties,
+    Disk: DiskProfile,
+):
 
-def ode_with_gas(m1, m2, a, e, alpha, cs, sig_trap):
-
-    a = _safe_sma(a)
-    e = _safe_eccentricity(e)
-    if not _is_physical_state(a, e):
+    a_cm = _safe_sma(Evolparams, a_cm)
+    e = _safe_eccentricity(Evolparams, e)
+    if not _is_physical_state(Evolparams, a_cm, e):
         return np.nan, np.nan
 
     # Reduced mass and orbital frequency
-    mu = m1 * m2 / (m1 + m2)
-    Omega = np.sqrt(const.G * (m1 + m2) / a**3)
+    mu = m1_g * m2_g / (m1_g + m2_g)
+    Omega = np.sqrt(const.G * (m1_g + m2_g) / a_cm**3)
 
     # Effective eccentricity for de/dt to avoid singularity at e=1
     e_eff = max(e, Evolparams.ecc_floor)
 
+    alpha = AGN.alpha
+    r_trap_cm = Disk.r_trap_cm
+    cs_cgs = Disk.get_cs(r_trap_cm)
+    sig_trap_cgs = Disk.get_sigma(r_trap_cm)
     # Gas hardening terms based on Ishibashi & Grobner 2020
-    da_dt_gas = -24 * np.pi * alpha * cs**2 * sig_trap * (1 + e) ** 2 * a / (mu * Omega)
+    da_dt_gas = (
+        -24
+        * np.pi
+        * alpha
+        * cs_cgs**2
+        * sig_trap_cgs
+        * (1 + e) ** 2
+        * a_cm
+        / (mu * Omega)
+    )
 
     de_dt_gas = (
         12
         * np.pi
         * alpha
-        * cs**2
-        * sig_trap
+        * cs_cgs**2
+        * sig_trap_cgs
         * np.sqrt(1 - e**2)
         * (1 + e) ** 2
         * (1 - np.sqrt(1 - e**2))
@@ -43,39 +73,40 @@ def ode_with_gas(m1, m2, a, e, alpha, cs, sig_trap):
     )
 
     # GW terms
-    da_dt_gw, de_dt_gw = ode_gw_only(m1, m2, a, e)
+    da_dt_gw, de_dt_gw = ode_gw_only(m1_g, m2_g, a_cm, e)
 
     # Return combined rates
     return da_dt_gas + da_dt_gw, de_dt_gas + de_dt_gw
 
 
 def evolve_gas(
+    Evolparams: BBHEvolver,
     Disk: DiskProfile,
-    BBH: BBHEvolver,
+    BBH: BBH_properties,
     AGN: AGN_properties,
     i: int,
     flags: object,
     t_ini_s: float,
 ) -> tuple:
-    '''Evolve one binary through the gas hardening phase until merger or stop condition is met.'''
+    """Evolve one binary through the gas hardening phase until merger or stop condition is met."""
 
-    m1 = BBH.m1_msun[i] * const.msun
-    m2 = BBH.m2_msun[i] * const.msun
+    m1_g = BBH.m1_msun[i] * const.msun
+    m2_g = BBH.m2_msun[i] * const.msun
     a = BBH.sma_cm[i]
     e = BBH.ecc[i]
 
-    freq_gw = pq.frequency_from_sma(m1, m2, a)
+    freq_gw = pq.frequency_from_sma(m1_g, m2_g, a)
 
     duty_cycle_s = AGN.AGNlifetime * 1e6 * const.yr
 
     # Time limits
     t_hubble_s = const.tHubble * 1e6 * const.yr
-    t_est = pq.compute_merger_time_estimate(m1, m2, a, e)
+    t_est = pq.compute_merger_time_estimate(m1_g, m2_g, a, e)
 
     # Initialize
-    r_th = pq.threshold_radius(m1, m2)
-    
-    h = 1e-6 * t_est # Initial timestep
+    r_th = pq.threshold_radius(m1_g, m2_g)
+
+    h = 1e-6 * t_est  # Initial timestep
 
     t_delay_s = 0.0
     ecc10 = 0.0
@@ -83,17 +114,10 @@ def evolve_gas(
 
     # Check if binary can reach migration trap.
     if not np.isfinite(t_ini_s) or t_ini_s > duty_cycle_s:
-        return stop_cond._stop_for_trap_not_reached(
-            BBH, i, flags, t_ini_s
-        )
+        return stop_cond._stop_for_trap_not_reached(BBH, i, flags, t_ini_s)
 
     # expected normal procedure, trap reached
     flags.trap_reached_flag[i] = 1
-
-    # AGN parameters are only needed after the binary reaches the trap.
-    alpha = AGN.alpha
-    cs_cgs = Disk.get_cs(AGN.rtrap)
-    sig_trap_cgs = Disk.get_sigma(AGN.rtrap)
 
     # Check if already very close to merger
     if (a - r_th) / r_th < 1e-1:
@@ -114,19 +138,23 @@ def evolve_gas(
         if stop_cond._stop_for_walltime(flags, i):
             break
 
-        freq_gw = pq.frequency_from_sma(m1, m2, a)
+        freq_gw = pq.frequency_from_sma(m1_g, m2_g, a)
         loop_num += 1
 
         # Check if we've passed 10 Hz
         if not reached_10hz and freq_gw >= 10.0:
             # Compute eccentricity at exactly 10 Hz
-            ecc10 = pq.compute_eccentricity_at_frequency(m1, m2, a, e, target_freq=10.0)
+            ecc10 = pq.compute_eccentricity_at_frequency(
+                m1_g, m2_g, a, e, target_freq=10.0
+            )
             reached_10hz = True
 
         # Check if we've passed 0.1 Hz
         if not reached_0p1hz and freq_gw >= 0.1:
             # Compute eccentricity at exactly 0.1 Hz
-            ecc0p1 = pq.compute_eccentricity_at_frequency(m1, m2, a, e, target_freq=0.1)
+            ecc0p1 = pq.compute_eccentricity_at_frequency(
+                m1_g, m2_g, a, e, target_freq=0.1
+            )
             reached_0p1hz = True
 
         # Check if still within AGN duty cycle
@@ -136,31 +164,27 @@ def evolve_gas(
 
             # Evolve with gas hardening
             a_new, e_new, h = para_evo(
-                m1, m2, a, e, h, ode_with_gas, alpha, cs_cgs, sig_trap_cgs 
+                Evolparams, m1_g, m2_g, a, e, h, ode_with_gas, AGN, Disk
             )
         else:
             # AGN disk closed, evolve with GW only
             flags.continue_ng_flag[i] = 0
 
-            a_new, e_new, h = para_evo(
-                m1, m2, a, e, h, ode_gw_only
-            )
+            a_new, e_new, h = para_evo(Evolparams, m1_g, m2_g, a, e, h, ode_gw_only)
 
-        if not (
-            _is_physical_state(a_new, e_new) and np.isfinite(h) and h > 0.0
-        ):
+        if not (_is_physical_state(a_new, e_new) and np.isfinite(h) and h > 0.0):
             stop_cond._stop_for_invalid_step(flags, i)
             break
 
         a, e = a_new, e_new
         bsi_active = t_delay_s + t_ini_s <= duty_cycle_s
 
-        a, e, m1, m2, bsi_stop_reason = bsi._apply_bsi_step(
-            BBH, flags, i, a, e, m1, m2, h, bsi_active=bsi_active
+        a, e, m1_g, m2_g, bsi_stop_reason = bsi._apply_bsi_step(
+            BBH, flags, i, a, e, m1_g, m2_g, h, bsi_active=bsi_active
         )
 
-        r_th = pq.threshold_radius(m1, m2)
-        freq_gw = pq.frequency_from_sma(m1, m2, a)
+        r_th = pq.threshold_radius(m1_g, m2_g)
+        freq_gw = pq.frequency_from_sma(m1_g, m2_g, a)
 
         # Update time
         t_delay_s += h

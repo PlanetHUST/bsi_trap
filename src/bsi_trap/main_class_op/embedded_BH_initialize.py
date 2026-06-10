@@ -57,13 +57,13 @@ def load_filtered_stellar_population(fil, gf):
 def assign_spin_tilts(BBH, model_config):
     """Assign spin-tilt angles using the gas/no-gas convention."""
 
-    N=len(BBH.th1)
+    N = len(BBH.th1)
 
-    if model_config.gas_mode=='with_gas':
+    if model_config.gas_mode == "with_gas":
         theta_1 = np.clip(np.random.normal(loc=1, scale=0.1, size=N), None, 1.0)
         theta_2 = np.clip(np.random.normal(loc=1, scale=0.1, size=N), None, 1.0)
 
-    elif model_config.gas_mode=='without_gas':
+    elif model_config.gas_mode == "without_gas":
         theta_1 = np.random.uniform(-1, 1, size=N)
         theta_2 = np.random.uniform(-1, 1, size=N)
     else:
@@ -74,8 +74,12 @@ def assign_spin_tilts(BBH, model_config):
     BBH.th1 = th1
     BBH.th2 = th2
 
-def embedded_BH_initialize(AGN:AGN_properties, Disk:DiskProfile, model_config: ModelConfig)->BBH_properties:
-    raise NotImplementedError(
-        "Embedded BBH population construction is not implemented yet; "
-        "use initialize_stellar and an explicit pair-up model."
-    )
+
+def embedded_BH_initialize(
+    AGN: AGN_properties, Disk: DiskProfile, model_config: ModelConfig
+) -> BBH_properties:
+
+    # 1. calculate the number of embedded BHs
+    # 2. get bbh.m1_msun, bbh.t_form_s
+    # 3. other parameters like m2_msun, spins, thetas will be initialized after pairing up
+    pass

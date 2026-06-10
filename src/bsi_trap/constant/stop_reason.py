@@ -1,4 +1,3 @@
-
 ############stop-reason flags##################
 # These integer codes are persisted to HDF5 as ``stop_reason_flag``. Keep the
 # numeric values stable once output files have been produced, because plotting

@@ -23,11 +23,6 @@ def run_analysis_workflow(
     summary_path: Path,
     output_dir: Path,
 ) -> dict[str, Any]:
-    """
-    High-level analysis workflow.
-
-    Keep statistical analysis here, not inside CLI or parallel execution.
-    """
 
     logger.info("Starting analysis workflow")
 

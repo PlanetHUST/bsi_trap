@@ -23,15 +23,6 @@ def run_simulation_workflow(
     base_seed: int = 42,
     timeout: float | None = None,
 ) -> list[SimulationResult]:
-    """
-    High-level simulation workflow.
-
-    This function prepares the simulation configuration and delegates
-    parallel execution to ParallelSimulationManager.
-
-    It should not contain physics formulas.
-    It should not contain multiprocessing internals.
-    """
 
     logger.info("Preparing simulation workflow")
 

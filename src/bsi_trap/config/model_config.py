@@ -11,6 +11,7 @@ class ModelConfig:
     disk_model: Literal["sirko", "thompson"] = "sirko"
     bsi_enabled: bool = False
     agn_lifetime_myr: float = 10.0
+    alpha: float = 0.01
     disk_resolution: int = 256
     migrator_mass_msun: float = 10.0
 

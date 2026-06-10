@@ -1,6 +1,12 @@
 import numpy as np
 import logging
 
+from bsi_trap.classes.classes import (
+    BBHEvolver,
+    BBH_properties,
+    AGN_properties,
+    merger_flags,
+)
 import bsi_trap.constant.constant as const
 from bsi_trap.evolve import bsi
 from bsi_trap.evolve import numeric
@@ -24,7 +30,13 @@ def ode_gw_only(m1, m2, a, e):
     return da_dt, de_dt
 
 
-def evolve_gw_only(BBH, AGN, i, flags, t_ini_s):
+def evolve_gw_only(
+    BBH: BBH_properties,
+    AGN: AGN_properties,
+    i: int,
+    flags: merger_flags,
+    t_ini_s: float,
+):
     """
     Evolve one binary with GW emission only.
     """
@@ -50,9 +62,7 @@ def evolve_gw_only(BBH, AGN, i, flags, t_ini_s):
 
     # Check if binary can reach migration trap.
     if not np.isfinite(t_ini_s) or t_ini_s > duty_cycle_s:
-        return stop_cond._stop_for_trap_not_reached(
-            BBH, i, flags, t_ini_s
-        )
+        return stop_cond._stop_for_trap_not_reached(BBH, i, flags, t_ini_s)
 
     flags.trap_reached_flag[i] = 1
 
@@ -115,7 +125,6 @@ def evolve_gw_only(BBH, AGN, i, flags, t_ini_s):
         r_th = pq.threshold_radius(m1, m2)
         freq_gw = 1.0 / np.pi * np.sqrt(const.G * (m1 + m2) / a**3)
         t_delay_s += h
-
 
         if bsi_stop_reason is not None:
             break
