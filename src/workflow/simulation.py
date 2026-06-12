@@ -19,7 +19,7 @@ from bsi_trap.main_class_op.embedded_BH_initialize import embedded_BH_initialize
 from bsi_trap.main_class_op.class_convert import embedded_to_BBH, BBH_to_ngen
 from bsi_trap.disk_profile.migration_torque import find_traps
 from bsi_trap.disk_profile.pagn_disk_adapter import build_pagn_disk_profile
-from bsi_trap.main_class_op.BBH_initialize import BBH_params_initialize
+from bsi_trap.main_class_op.BH_params_initialize import BBH_params_initialize
 
 
 @dataclass(frozen=True)
@@ -70,17 +70,20 @@ def _build_environment(
 
 
 def initialize_to_trap(
-    model_config: ModelConfig, agn: AGN_properties, disk: DiskProfile
+    model_config: ModelConfig,
+    agn: AGN_properties,
+    disk: DiskProfile,
+    rng: np.random.Generator,
 ) -> Tuple[BBH_properties, single_BH_properties, BBH_properties, single_BH_properties]:
 
     # 1. initialize embedded BH properties
-    ebh = embedded_BH_initialize(agn, disk, model_config)
+    ebh = embedded_BH_initialize(agn, disk)
 
     # 2. embedded BH to BBHs in trap
     bbh_1g, sbh_1g = embedded_to_BBH(model_config, agn, disk, ebh)
 
     # random parameter filling (a,e,chi)
-    BBH_params_initialize(model_config, disk, bbh_1g)
+    BBH_params_initialize(agn, disk, bbh_1g, rng)
 
     # 3. hierarchical mergers
     bbh_ng, sbh_ng = BBH_to_ngen()
@@ -94,12 +97,13 @@ def run_physics_sample(
     smbh_mass: float,
     seed: int,
     output_file: Path,
+    rng: np.random.Generator,
 ) -> SampleWorkflowResult:
     """single physical task for one AGN-NSC sample"""
     agn, disk = _build_environment(model_config, smbh_mass)
 
     # 1. initialize bbh properties
-    bbh_1g, sbh_1g, bbh_ng, sbh_ng = initialize_to_trap(model_config, agn, disk)
+    bbh_1g, sbh_1g, bbh_ng, sbh_ng = initialize_to_trap(model_config, agn, disk, rng)
 
     # 2. storage for the sample
 

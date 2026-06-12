@@ -5,6 +5,7 @@ from bsi_trap.evolve.gw import ode_gw_only
 from bsi_trap.classes.classes import (
     BBHEvolver,
     BBH_properties,
+    Single_BH_properties,
     DiskProfile,
     AGN_properties,
 )

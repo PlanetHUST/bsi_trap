@@ -157,7 +157,7 @@ class BBH_properties(object):
         self.bbh_flag = None
 
 
-class single_BH_properties(object):
+class Single_BH_properties(object):
     "single BH population properties in the trap"
 
     def __init__(self, num):

@@ -1,4 +1,8 @@
 import numpy as np
+from numpy.random import Generator
+
+from bsi_trap.config.model_config import ModelConfig
+from bsi_trap.classes.classes import AGN_properties, DiskProfile, BBH_properties
 
 
 def sample_smbh_mass(size: int, rng: np.random.Generator) -> np.ndarray:
@@ -13,84 +17,95 @@ def sample_duty_cycle_myr(rng: np.random.Generator) -> float:
     return float(np.clip(10**value, 0.0, None))
 
 
-def ecc(values) -> np.ndarray:
+def sample_bbh_ecc(num: int, rng: Generator) -> np.ndarray:
     """Sample the thermal eccentricity distribution P(e) = 2e."""
-    return np.sqrt(np.random.random(len(values)))
+    return np.sqrt(rng.random(num))
 
 
-def semimajor(m1, m2, AGN) -> np.ndarray:
+def sample_bbh_semimajor(
+    AGN: AGN_properties, disk: DiskProfile, bbh: BBH_properties
+) -> np.ndarray:
     """Sample inner binary separations using the legacy a^(9/2) law."""
-    m1 = np.asarray(m1, dtype=float)
-    m2 = np.asarray(m2, dtype=float)
-    a_min = 6.957e10
-    a_max = AGN.rtrap * (
-        (np.max(m1) + np.max(m2)) / float(AGN.M_SMBH)
-    ) ** (1.0 / 3.0)
-    x = np.random.random(len(m1))
-    return (
-        (a_max ** (11.0 / 2.0) - a_min ** (11.0 / 2.0)) * x
-        + a_min ** (11.0 / 2.0)
-    ) ** (2.0 / 11.0)
+    pass
 
 
-def secondary(m1, m2min) -> float:
-    """Sample a secondary mass using the legacy O'Leary distribution."""
-    normalization = (2.0 * m1) ** 5.0 - (m1 + m2min) ** 5.0
-    if normalization <= 0.0:
-        return float(m2min)
-    return float(
-        (
-            np.random.random() * normalization
-            + (m1 + m2min) ** 5.0
-        ) ** (1.0 / 5.0)
-        - m1
-    )
-
-
-def spin(rms=0.1) -> float:
+def sample_spin_values(rng: Generator, rms=0.1) -> float:
     """Sample a dimensionless spin magnitude truncated at one."""
     while True:
-        value = float(np.linalg.norm(np.random.normal(0.0, rms, size=3)))
+        value = float(np.linalg.norm(rng.normal(0.0, rms, size=3)))
         if value <= 1.0:
             return value
 
 
+def sample_spin_tilts(
+    BBH: BBH_properties,
+    model_config: ModelConfig,
+    rng: Generator,
+) -> None:
+    """Assign spin-tilt angles using the gas/no-gas convention."""
+
+    num = BBH.num
+
+    if model_config.gas_mode == "with_gas":
+        cos_theta_1 = np.clip(
+            rng.normal(loc=1.0, scale=0.1, size=num),
+            -1.0,
+            1.0,
+        )
+        cos_theta_2 = np.clip(
+            rng.normal(loc=1.0, scale=0.1, size=num),
+            -1.0,
+            1.0,
+        )
+
+    elif model_config.gas_mode == "without_gas":
+        cos_theta_1 = rng.uniform(-1.0, 1.0, size=num)
+        cos_theta_2 = rng.uniform(-1.0, 1.0, size=num)
+
+    else:
+        raise ValueError(f"Unknown gas_mode: {model_config.gas_mode}")
+
+    BBH.th1 = np.arccos(cos_theta_1)
+    BBH.th2 = np.arccos(cos_theta_2)
+
+
 ################### NSC stars' SMA Sampleing ###############
-def semimajor_out(N, AGN, min_index, max_index, gamma=7 / 4):
+def sample_embedded_radius(
+    N: int, AGN: AGN_properties, disk: DiskProfile, rng: Generator, gamma=7 / 4
+):
     gamma = -gamma + 2  # change from number density to power index in volume intergral
 
-    rg = AGN.rg  # in cm
-    rmin = 10**min_index * rg
-    rmax = 10**max_index * rg
+    rmin_cm = disk.r_in_cm
+    rmax_cm = disk.r_out_cm
     gamma1 = gamma + 1.0  # for reverse method
 
-    rmin_pow = rmin**gamma1
-    rmax_pow = rmax**gamma1
+    rmin_pow = rmin_cm**gamma1
+    rmax_pow = rmax_cm**gamma1
 
-    u = np.random.random(N)
+    u = rng.random(N)
     sma = (rmin_pow + u * (rmax_pow - rmin_pow)) ** (1 / gamma1)
     return sma
 
 
-def semimajor_out_random_linear(N, AGN, min_index, max_index):
-    rg = AGN.rg
-    rmin = 10**min_index * rg
-    rmax = 10**max_index * rg
-    u = np.random.random(N)
-    sma = u * (rmax - rmin) + rmin  # Linear interpolation
-    return sma
+# def semimajor_out_random_linear(N, AGN, min_index, max_index):
+#     rg = AGN.rg
+#     rmin = 10**min_index * rg
+#     rmax = 10**max_index * rg
+#     u = np.random.random(N)
+#     sma = u * (rmax - rmin) + rmin  # Linear interpolation
+#     return sma
 
 
-# Alternative (uniform logarithmic):
-def semimajor_out_random_log(N, AGN, min_index, max_index):
-    rg = AGN.rg
-    u = np.random.random(N)
-    log_sma = u * (max_index - min_index) + min_index  # Linear in log space
-    sma = 10**log_sma * rg  # Convert back to linear
-    return sma
+# # Alternative (uniform logarithmic):
+# def semimajor_out_random_log(N, AGN, min_index, max_index):
+#     rg = AGN.rg
+#     u = np.random.random(N)
+#     log_sma = u * (max_index - min_index) + min_index  # Linear in log space
+#     sma = 10**log_sma * rg  # Convert back to linear
+#     return sma
 
 
-def fBH_sample():
-    """sample the BH fraction in the nsc with Gaussion distribution"""
-    val = np.random.normal(loc=0.04, scale=0.01)
-    return float(np.clip(val, 0.0, 1.0))
+# def fBH_sample():
+#     """sample the BH fraction in the nsc with Gaussion distribution"""
+#     val = np.random.normal(loc=0.04, scale=0.01)
+#     return float(np.clip(val, 0.0, 1.0))

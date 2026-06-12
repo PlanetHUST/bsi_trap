@@ -1,14 +1,26 @@
 import numpy as np
 
-from bsi_trap.classes.classes import Embedded_BH
+from bsi_trap.constant.constant import G
+from bsi_trap.classes.classes import Embedded_BH, AGN_properties, DiskProfile
 
 
 # important to investigate in similar works
-def pair_up_timescale(m1, m2, t0=1e4, alpha=1.0):
-    return t0 * ((m1 + m2) / 20.0) ** (-alpha)
+def pair_up_timescale(
+    agn: AGN_properties, disk: DiskProfile, m1: float, m2: float
+) -> float:
+    r_trap_cm = disk.r_trap_cm
+    cs_cgs = disk.get_cs(r_trap_cm)
+    h = disk.get_h(r_trap_cm)
+    sigma_cgs = disk.get_sigma(r_trap_cm)
+    t_pair_s = (
+        3 * cs_cgs**3 * h * r_trap_cm / (4 * np.pi * G**2 * sigma_cgs * (m1 + m2))
+    )
+    return t_pair_s
 
 
 def construct_trap_population(
+    agn: AGN_properties,
+    disk: DiskProfile,
     ebh: Embedded_BH,
     mask: np.ndarray,
     seed: int | None = None,
@@ -49,7 +61,7 @@ def construct_trap_population(
             t_j = ebh.t_ini_s[j]
 
             dt = t_i - t_j
-            tp = pair_up_timescale(m_i, m_j)
+            tp = pair_up_timescale(agn, disk, m_i, m_j)
 
             if dt <= tp:
                 candidates.append((j, tp))
