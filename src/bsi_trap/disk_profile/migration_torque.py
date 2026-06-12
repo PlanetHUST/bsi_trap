@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Optional, Tuple
 
-from bsi_trap.classes import MigrationParameters, TorqueProfile, TrapSelection
+from bsi_trap.classes import MigrationParameters, TorqueProfile
 from bsi_trap.disk_profile.pagn_get import constant, require_pagn_bits
 from bsi_trap.disk_profile.disk_numeric import (
     sorted_disk_view,
@@ -125,9 +125,15 @@ def compute_torque_profile(
     sigma = surface_density(disk_view)
     pressure = total_pressure(disk_view)
 
-    dsigma_dlogr = radial_log_slope(disk_view.R, sigma, smoothing=smoothing)
-    dtemp_dlogr = radial_log_slope(disk_view.R, disk_view.T, smoothing=smoothing)
-    dpressure_dlogr = radial_log_slope(disk_view.R, pressure, smoothing=smoothing)
+    dsigma_dlogr = np.asarray(
+        radial_log_slope(disk_view.R, sigma, smoothing=smoothing), dtype=float
+    )
+    dtemp_dlogr = np.asarray(
+        radial_log_slope(disk_view.R, disk_view.T, smoothing=smoothing), dtype=float
+    )
+    dpressure_dlogr = np.asarray(
+        radial_log_slope(disk_view.R, pressure, smoothing=smoothing), dtype=float
+    )
 
     q = migrator_mass / disk_view.Mbh  # mass ratio of migrator to central black hole
     h_over_r = disk_view.h / disk_view.R  # aspect ratio of the disk at each radius
@@ -294,7 +300,7 @@ def find_traps(
     smoothing: float = 0.005,
     params: Optional[MigrationParameters] = None,
     fallback_radius_cm: Optional[float] = None,
-) -> TrapSelection:
+) -> Tuple[float, float, TorqueProfile]:
     """Compute the torque profile and select the trap used by the workflow."""
     torque_profile = compute_torque_profile(
         disk,
@@ -313,34 +319,28 @@ def find_traps(
         nearest = np.argmin(np.abs(antitrap_radii - r_trap))
         r_antitrap = float(antitrap_radii[nearest])
 
-    return TrapSelection(
-        r_trap_cm=r_trap,
-        r_antitrap_cm=r_antitrap,
-        trap_radii_cm=trap_radii,
-        antitrap_radii_cm=antitrap_radii,
-        fallback_used=fallback_used,
-        torque_profile=torque_profile,
-    )
+    # need detail chech
+    return r_trap, r_antitrap, torque_profile
 
 
-def find_outermost_stable_trap(
-    disk,
-    *,
-    migrator_mass_msun: float = 10.0,
-    smoothing: float = 0.005,
-    params: Optional[MigrationParameters] = None,
-    fallback_radius_cm: Optional[float] = None,
-) -> Tuple[float, np.ndarray, TorqueProfile]:
-    """Compatibility wrapper returning the historical three-value result."""
-    selection = find_traps(
-        disk,
-        migrator_mass_msun=migrator_mass_msun,
-        smoothing=smoothing,
-        params=params,
-        fallback_radius_cm=fallback_radius_cm,
-    )
-    return (
-        selection.r_trap_cm,
-        selection.trap_radii_cm,
-        selection.torque_profile,
-    )
+# def find_outermost_stable_trap(
+#     disk,
+#     *,
+#     migrator_mass_msun: float = 10.0,
+#     smoothing: float = 0.005,
+#     params: Optional[MigrationParameters] = None,
+#     fallback_radius_cm: Optional[float] = None,
+# ) -> Tuple[float, np.ndarray, TorqueProfile]:
+#     """Compatibility wrapper returning the historical three-value result."""
+#     selection = find_traps(
+#         disk,
+#         migrator_mass_msun=migrator_mass_msun,
+#         smoothing=smoothing,
+#         params=params,
+#         fallback_radius_cm=fallback_radius_cm,
+#     )
+#     return (
+#         selection.r_trap_cm,
+#         selection.trap_radii_cm,
+#         selection.torque_profile,
+#     )

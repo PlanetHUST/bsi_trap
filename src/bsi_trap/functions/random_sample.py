@@ -1,8 +1,10 @@
 import numpy as np
 from numpy.random import Generator
+from typing import Tuple
 
 from bsi_trap.config.model_config import ModelConfig
 from bsi_trap.classes.classes import AGN_properties, DiskProfile, BBH_properties
+from bsi_trap.constant.constant import Rsun
 
 
 def sample_smbh_mass(size: int, rng: np.random.Generator) -> np.ndarray:
@@ -23,28 +25,55 @@ def sample_bbh_ecc(num: int, rng: Generator) -> np.ndarray:
 
 
 def sample_bbh_semimajor(
-    AGN: AGN_properties, disk: DiskProfile, bbh: BBH_properties
+    AGN: AGN_properties,
+    disk: DiskProfile,
+    bbh: BBH_properties,
+    rng: Generator,
 ) -> np.ndarray:
-    """Sample inner binary separations using the legacy a^(9/2) law."""
-    pass
+    """Sample BBH inner semimajor axes in cm with p(a) proportional to a^(9/2)."""
+    if bbh.num == 0:
+        return np.empty(0, dtype=float)
+
+    total_mass_msun = bbh.m1_msun + bbh.m2_msun
+    if np.any(total_mass_msun <= 0.0):
+        raise ValueError("BBH component masses must be positive")
+
+    a_min_cm = Rsun
+    max_total_mass_msun = float(np.max(total_mass_msun))
+    a_max_cm = disk.r_trap_cm * (
+        max_total_mass_msun / AGN.M_SMBH_msun
+    ) ** (1.0 / 3.0)
+    if not np.isfinite(a_max_cm) or a_max_cm <= a_min_cm:
+        raise ValueError(
+            "The trap Hill radius must exceed one solar radius for BBH sampling"
+        )
+
+    power = 11.0 / 2.0
+    u = rng.random(bbh.num)
+    return (
+        a_min_cm**power + u * (a_max_cm**power - a_min_cm**power)
+    ) ** (1.0 / power)
 
 
-def sample_spin_values(rng: Generator, rms=0.1) -> float:
+def sample_spin_values(num: int, rng: Generator, rms=0.1) -> np.ndarray:
     """Sample a dimensionless spin magnitude truncated at one."""
-    while True:
-        value = float(np.linalg.norm(rng.normal(0.0, rms, size=3)))
-        if value <= 1.0:
-            return value
+    spin_values = np.linalg.norm(rng.normal(0.0, rms, size=(num, 3)), axis=1)
+    invalid = spin_values > 1.0
+    while np.any(invalid):
+        spin_values[invalid] = np.linalg.norm(
+            rng.normal(0.0, rms, size=(int(np.sum(invalid)), 3)),
+            axis=1,
+        )
+        invalid = spin_values > 1.0
+    return spin_values
 
 
 def sample_spin_tilts(
-    BBH: BBH_properties,
+    num: int,
     model_config: ModelConfig,
     rng: Generator,
-) -> None:
+) -> Tuple[np.ndarray, np.ndarray]:
     """Assign spin-tilt angles using the gas/no-gas convention."""
-
-    num = BBH.num
 
     if model_config.gas_mode == "with_gas":
         cos_theta_1 = np.clip(
@@ -65,8 +94,7 @@ def sample_spin_tilts(
     else:
         raise ValueError(f"Unknown gas_mode: {model_config.gas_mode}")
 
-    BBH.th1 = np.arccos(cos_theta_1)
-    BBH.th2 = np.arccos(cos_theta_2)
+    return np.arccos(cos_theta_1), np.arccos(cos_theta_2)
 
 
 ################### NSC stars' SMA Sampleing ###############

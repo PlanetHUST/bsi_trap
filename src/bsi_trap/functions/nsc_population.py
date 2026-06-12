@@ -3,7 +3,7 @@
 import numpy as np
 
 import bsi_trap.constant.constant as const
-from bsi_trap.classes.classes import AGN_properties, stellar_properties
+from bsi_trap.classes.classes import AGN_properties, DiskProfile
 
 gamma = 1.3
 
@@ -58,7 +58,9 @@ def mass_R_NSC(M_SMBH_msun: float, R_cm: float, gamma: float = 1.3) -> float:
     return m_enclosed_msun
 
 
-def number_R_NSC(M_SMBH_msun: float, mave_msun: float, R_cm: float, gamma: float = 1.3):
+def number_R_NSC(
+    M_SMBH_msun: float, mave_msun: float, R_cm: float, gamma: float = 1.3
+) -> int:
     # number enclosed in R_cm
     mave_g = mave_msun * const.msun
     M_SMBH_g = M_SMBH_msun * const.msun
@@ -69,7 +71,7 @@ def number_R_NSC(M_SMBH_msun: float, mave_msun: float, R_cm: float, gamma: float
         * rm_cm ** (-3)
         * (R_cm / rm_cm) ** (-gamma)
     )
-    return number
+    return int(number)
 
 
 def velocity_disp(M_SMBH_msun: float) -> float:
@@ -77,9 +79,9 @@ def velocity_disp(M_SMBH_msun: float) -> float:
     return vel_cgs
 
 
-def vesc(AGN: AGN_properties):
+def vesc(AGN: AGN_properties, disk: DiskProfile):
     Msmbh_msun = AGN.M_SMBH_msun
 
-    M_tot_msun = Msmbh_msun + mass_R_NSC(Msmbh_msun, AGN.rtrap)
-    vesc = np.sqrt(2 * const.G * (M_tot_msun * const.msun) / (AGN.rtrap))
+    M_tot_msun = Msmbh_msun + mass_R_NSC(Msmbh_msun, disk.r_trap_cm)
+    vesc = np.sqrt(2 * const.G * (M_tot_msun * const.msun) / disk.r_trap_cm)
     return vesc, M_tot_msun

@@ -55,7 +55,7 @@ def adaptive_timestep(Evolparams, a, e, ka, ke, h):
 
 def rk4_step(Evolparams, m1, m2, a, e, h, ode_func, *ode_args):
     """4th order Runge-Kutta integration step"""
-    if not is_physical_state(a, e):
+    if not is_physical_state(Evolparams, a, e):
         logging.warning(f"Attempting RK4 step from non-physical state: a={a}, e={e}")
         return np.nan, np.nan, np.nan
 
@@ -63,14 +63,14 @@ def rk4_step(Evolparams, m1, m2, a, e, h, ode_func, *ode_args):
 
     for _ in range(30):
         k1_a, k1_e = ode_func(Evolparams, m1, m2, a, e, *ode_args)
-        h_step = adaptive_timestep(a, e, k1_a, k1_e, h_try)
+        h_step = adaptive_timestep(Evolparams, a, e, k1_a, k1_e, h_try)
         if not np.isfinite(h_step) or h_step <= 0.0:
             h_try *= 0.1
             continue
 
         a2 = a + 0.5 * h_step * k1_a
         e2 = e + 0.5 * h_step * k1_e
-        if not is_physical_state(a2, e2):
+        if not is_physical_state(Evolparams, a2, e2):
             h_try = 0.1 * h_step
             continue
         k2_a, k2_e = ode_func(Evolparams, m1, m2, a2, e2, *ode_args)
@@ -80,7 +80,7 @@ def rk4_step(Evolparams, m1, m2, a, e, h, ode_func, *ode_args):
 
         a3 = a + 0.5 * h_step * k2_a
         e3 = e + 0.5 * h_step * k2_e
-        if not is_physical_state(a3, e3):
+        if not is_physical_state(Evolparams, a3, e3):
             h_try = 0.1 * h_step
             continue
         k3_a, k3_e = ode_func(Evolparams, m1, m2, a3, e3, *ode_args)
@@ -90,7 +90,7 @@ def rk4_step(Evolparams, m1, m2, a, e, h, ode_func, *ode_args):
 
         a4 = a + h_step * k3_a
         e4 = e + h_step * k3_e
-        if not is_physical_state(a4, e4):
+        if not is_physical_state(Evolparams, a4, e4):
             h_try = 0.1 * h_step
             continue
         k4_a, k4_e = ode_func(Evolparams, m1, m2, a4, e4, *ode_args)
@@ -100,7 +100,7 @@ def rk4_step(Evolparams, m1, m2, a, e, h, ode_func, *ode_args):
 
         anew = a + (h_step / 6) * (k1_a + 2 * k2_a + 2 * k3_a + k4_a)
         enew = e + (h_step / 6) * (k1_e + 2 * k2_e + 2 * k3_e + k4_e)
-        if is_physical_state(anew, enew):
+        if is_physical_state(Evolparams, anew, enew):
             return float(anew), float(enew), float(h_step)
 
         h_try = 0.1 * h_step

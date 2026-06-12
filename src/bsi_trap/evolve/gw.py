@@ -2,10 +2,10 @@ import numpy as np
 import logging
 
 from bsi_trap.classes.classes import (
-    BBHEvolver,
+    BBHEvolverParams,
     BBH_properties,
     AGN_properties,
-    merger_flags,
+    BBH_flags,
 )
 import bsi_trap.constant.constant as const
 from bsi_trap.evolve import bsi
@@ -14,11 +14,11 @@ from bsi_trap.evolve import physical_quantity as pq
 from bsi_trap.evolve import stop_conditions as stop_cond
 
 
-def ode_gw_only(m1, m2, a, e):
+def ode_gw_only(Evolparams, m1, m2, a, e):
     """Peters 1964 GW evolution formulas"""
-    a = numeric._safe_sma(a)
-    e = numeric._safe_eccentricity(e)
-    if not numeric._is_physical_state(a, e):
+    a = numeric.safe_sma(Evolparams, a)
+    e = numeric.safe_eccentricity(Evolparams, e)
+    if not numeric.is_physical_state(Evolparams, a, e):
         logging.warning(f"Non-physical state detected in GW evolution: a={a}, e={e}")
         return np.nan, np.nan
 
@@ -31,26 +31,27 @@ def ode_gw_only(m1, m2, a, e):
 
 
 def evolve_gw_only(
-    BBH: BBH_properties,
-    AGN: AGN_properties,
+    Evolparams,
+    bbh: BBH_properties,
+    agn: AGN_properties,
     i: int,
-    flags: merger_flags,
     t_ini_s: float,
-):
+) -> tuple[BBH_properties, float, BBH_flags]:
     """
     Evolve one binary with GW emission only.
     """
 
     # Extract parameters
-    m1 = BBH.m1[i] * const.msun
-    m2 = BBH.m2[i] * const.msun
-    a = BBH.sma[i]
-    e = BBH.ecc[i]
-    R = BBH.A[i]  # outer orbital semimajor axis in cm
+    m1 = bbh.m1_msun[i] * const.msun
+    m2 = bbh.m2_msun[i] * const.msun
+    a = bbh.sma_cm[i]
+    e = bbh.ecc[i]
+
+    flags = bbh.flags
 
     # Time limits
-    t_hubble_s = const.tHubble * 1e6 * const.yr
-    duty_cycle_s = AGN.AGNlifetime * 1e6 * const.yr
+    t_hubble_s = const.tHubble * const.Myr
+    duty_cycle_s = agn.lifetime_myr * const.Myr
     t_est = pq.compute_merger_time_estimate(m1, m2, a, e)
 
     # Initialize
@@ -60,9 +61,9 @@ def evolve_gw_only(
     ecc10 = 0.0
     ecc0p1 = 0.0
 
-    # Check if binary can reach migration trap.
-    if not np.isfinite(t_ini_s) or t_ini_s > duty_cycle_s:
-        return stop_cond._stop_for_trap_not_reached(BBH, i, flags, t_ini_s)
+    # # Check if binary can reach migration trap.
+    # if not np.isfinite(t_ini_s) or t_ini_s > duty_cycle_s:
+    #     return stop_cond._stop_for_trap_not_reached(bbh, i, flags, t_ini_s)
 
     flags.trap_reached_flag[i] = 1
 
@@ -70,9 +71,9 @@ def evolve_gw_only(
     if (a - r_th) / r_th < 1e-1:
         flags.merger_flag[i] = 0
         flags.stop_reason_flag[i] = const.STOP_INITIAL_BINARY_TOO_TIGHT
-        BBH.ecc10[i] = np.nan  # Store nan since 10 Hz not reached
-        BBH.ecc0p1[i] = np.nan  # Store nan since 10 Hz not reached
-        return BBH, t_delay_s, t_ini_s, flags
+        bbh.ecc10[i] = np.nan  # Store nan since 10 Hz not reached
+        bbh.ecc0p1[i] = np.nan  # Store nan since 10 Hz not reached
+        return bbh, t_delay_s, flags
 
     # Store initial state
     freq_gw = 1.0 / np.pi * np.sqrt(const.G * (m1 + m2) / a**3)
@@ -109,25 +110,29 @@ def evolve_gw_only(
             reached_0p1hz = True
 
         # Evolve with GW only
-        a_new, e_new, h = numeric.para_evo(m1, m2, a, e, h, ode_gw_only)
+        a_new, e_new, h = numeric.para_evo(Evolparams, m1, m2, a, e, h, ode_gw_only)
         if not (
-            numeric._is_physical_state(a_new, e_new) and np.isfinite(h) and h > 0.0
+            numeric.is_physical_state(Evolparams, a_new, e_new)
+            and np.isfinite(h)
+            and h > 0.0
         ):
-            stop_cond._stop_for_invalid_step(flags, i)
+            # stop_cond._stop_for_invalid_step(flags, i)
             break
 
         # Update parameters
         a, e = a_new, e_new
-        bsi_active = t_delay_s + t_ini_s <= duty_cycle_s
-        a, e, m1, m2, bsi_stop_reason = bsi._apply_bsi_step(
-            BBH, flags, i, a, e, m1, m2, h, bsi_active=bsi_active
-        )
+
+        # bsi_active = t_delay_s + t_ini_s <= duty_cycle_s
+        # a, e, m1, m2, bsi_stop_reason = bsi._apply_bsi_step(
+        #     BBH, flags, i, a, e, m1, m2, h, bsi_active=bsi_active
+        # )
+
         r_th = pq.threshold_radius(m1, m2)
         freq_gw = 1.0 / np.pi * np.sqrt(const.G * (m1 + m2) / a**3)
         t_delay_s += h
 
-        if bsi_stop_reason is not None:
-            break
+        # if bsi_stop_reason is not None:
+        #     break
 
         # Check time limits
         if t_delay_s + t_ini_s > t_hubble_s:
@@ -148,9 +153,7 @@ def evolve_gw_only(
             break
 
     # Store results
-    BBH.sma2[i] = a
-    BBH.ecc2[i] = e
-    BBH.ecc10[i] = ecc10
-    BBH.ecc0p1[i] = ecc0p1
+    bbh.ecc10[i] = ecc10
+    bbh.ecc0p1[i] = ecc0p1
 
-    return BBH, t_delay_s, t_ini_s, flags
+    return bbh, t_delay_s, flags

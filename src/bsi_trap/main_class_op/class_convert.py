@@ -7,40 +7,47 @@ from bsi_trap.classes.classes import (
     Single_BH_properties,
     DiskProfile,
     AGN_properties,
-    bbh_flags,
 )
+from bsi_trap.constant.constant import Myr
 from bsi_trap.config.model_config import ModelConfig
 from bsi_trap.functions.migration_timescale import migration_timescale_torque
 from bsi_trap.functions.pair_up import construct_trap_population
-from bsi_trap.main_class_op.BH_params_initialize import BBH_params_initialize
-from bsi_trap.constant.constant import Myr
 
 
 def embedded_to_BBH(
-    model_config: ModelConfig, agn: AGN_properties, disk: DiskProfile, ebh: Embedded_BH
+    model_config: ModelConfig,
+    agn: AGN_properties,
+    disk: DiskProfile,
+    ebh: Embedded_BH,
+    rng_pair_up: np.random.Generator,
 ) -> Tuple[BBH_properties, Single_BH_properties]:
 
     # 1. calculate migration timescales
-    t_mig_s = migration_timescale_torque(ebh.m_msun, agn, disk, ebh.R_cm)
-
+    t_mig_s = migration_timescale_torque(
+        m_msun=ebh.m_msun,
+        R_ini_cm=ebh.R_cm,
+        AGN=agn,
+        Disk=disk,
+    )
     # 2. mask for trap reaching
     t_reach_s = t_mig_s + ebh.t_form_s
+    ebh.t_ini_s = t_reach_s
 
     mask_reach = t_reach_s < agn.lifetime_myr * Myr
 
     ebh.trap_flag[~mask_reach] = -1
 
     construct_trap_population(
-        agn, disk, ebh, mask_reach, seed=model_config.pair_up_seed
+        agn=agn, disk=disk, ebh=ebh, mask=mask_reach, rng=rng_pair_up
     )
 
-    bbh_1g = init_bbh(model_config, disk, ebh)
-    sbh_1g = init_sbh(ebh)
+    bbh_1g = _init_bbh(model_config=model_config, disk=disk, ebh=ebh)
+    sbh_1g = _init_sbh(ebh=ebh)
 
     return bbh_1g, sbh_1g
 
 
-def init_bbh(
+def _init_bbh(
     model_config: ModelConfig, disk: DiskProfile, ebh: Embedded_BH
 ) -> BBH_properties:
     """
@@ -66,8 +73,6 @@ def init_bbh(
     num_bbh = len(pair_i)
 
     bbh = BBH_properties(num_bbh)
-    bbh.bbh_flag = bbh_flags(num_bbh)
-
     m_i = ebh.m_msun[pair_i]
     m_j = ebh.m_msun[pair_j]
 
@@ -84,13 +89,10 @@ def init_bbh(
         ebh.t_ini_s[pair_j],
     )
 
-    # random set the bbh initial (a,e,chi)
-    BBH_params_initialize(model_config, disk, bbh)
-
     return bbh
 
 
-def init_sbh(ebh: Embedded_BH) -> Single_BH_properties:
+def _init_sbh(ebh: Embedded_BH) -> Single_BH_properties:
     """
     Convert unpaired trap BHs into single_BH_properties.
     """
@@ -104,14 +106,3 @@ def init_sbh(ebh: Embedded_BH) -> Single_BH_properties:
     sbh.t_ini_s = ebh.t_ini_s[sbh_idx]
 
     return sbh
-
-
-def BBH_to_ngen(
-    model_config: ModelConfig,
-    agn: AGN_properties,
-    disk: DiskProfile,
-    bbh: BBH_properties,
-    sBH: Single_BH_properties,
-):
-
-    pass

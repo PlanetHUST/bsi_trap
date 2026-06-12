@@ -1,4 +1,3 @@
-import logging
 import numpy as np
 from dataclasses import dataclass
 
@@ -10,11 +9,11 @@ class AGN_properties(object):
 
     def __init__(self, M_SMBH_msun, lifetime_myr):
         self.M_SMBH_msun = M_SMBH_msun
-        self.alpha = None
+        self.alpha: float = 0.01
         self.lifetime_myr = lifetime_myr
-        self.mave_msun = float
-        self.disk_profile = None
-        self.torque_profile = None
+        self.mave_msun: float = 1.0
+        self.disk_profile: DiskProfile | None = None
+        self.torque_profile: TorqueProfile | None = None
 
 
 @dataclass(frozen=True)
@@ -58,8 +57,8 @@ class DiskProfile:
         right = idx
 
         if abs(self.radius_cm[left] - r_cm) <= abs(self.radius_cm[right] - r_cm):
-            return left
-        return right
+            return int(left)
+        return int(right)
 
     def get_h(self, r_cm: float) -> float:
         return float(self.h_over_r[self.closest_index(r_cm)])
@@ -115,14 +114,22 @@ class Embedded_BH(object):
         )  # -1: trap not reach; -2: single stars; 0-num: binary pair-up with index
 
     def init_ebh(self, m_msun, t_form_s, R_cm):
-        if len(m_msun) == len(t_form_s) == len(R_cm) == self.num:
-            self.m_msun = m_msun
-            self.t_form_s = t_form_s
-            self.R_cm = R_cm
-        else:
-            logging.error(
-                f"unmatched length of variable with len(m_msun)={len(m_msun)}; len(t_form_s)={len(t_form_s)}; len(R_cm)={len(R_cm)}; num = {self.num}"
+        m_msun = np.asarray(m_msun, dtype=float)
+        t_form_s = np.asarray(t_form_s, dtype=float)
+        R_cm = np.asarray(R_cm, dtype=float)
+        if not (len(m_msun) == len(t_form_s) == len(R_cm) == self.num):
+            raise ValueError(
+                "Embedded-BH arrays must all match the declared population size "
+                f"{self.num}; got {len(m_msun)}, {len(t_form_s)}, and {len(R_cm)}"
             )
+        if np.any(m_msun <= 0.0) or np.any(t_form_s < 0.0) or np.any(R_cm <= 0.0):
+            raise ValueError(
+                "Embedded-BH masses/radii must be positive and times nonnegative"
+            )
+
+        self.m_msun = m_msun
+        self.t_form_s = t_form_s
+        self.R_cm = R_cm
 
 
 class BBH_properties(object):
@@ -154,7 +161,7 @@ class BBH_properties(object):
 
         self.t_ini_s = np.zeros(num, float)
         self.t_del_s = np.zeros(num, float)
-        self.bbh_flag = None
+        self.flags = BBH_flags(num)
 
 
 class Single_BH_properties(object):
@@ -191,7 +198,7 @@ class BBHEvolverParams:
         self.trap_bsi_context = None  # To store local conditions for BSI calculations
 
 
-class bbh_flags:
+class BBH_flags:
     def __init__(self, num):
         self.merger_flag = np.zeros(num, int)  # 1 if merger occurred, 0 otherwise
         self.GWescape_flag = np.zeros(num, int)
@@ -215,5 +222,5 @@ class MigrationParameters:
 
 
 class TrapContext:
-    def __ini__(self):
+    def __init__(self):
         pass

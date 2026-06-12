@@ -21,7 +21,7 @@ def stop_for_trap_not_reached(BBH, i, flags, t_ini_s, track_vectors):
     flags.merger_flag[i] = 0
     flags.continue_ng_flag[i] = 0
     flags.stop_reason_flag[i] = StopReasons.STOP_TRAP_NOT_REACHED
-    return BBH, 0.0, t_ini_s, flags, track_vectors
+    return BBH, 0.0, flags
 
 
 def stop_for_invalid_step(flags, i):
@@ -43,6 +43,3 @@ def _stop_for_trap_not_reached(BBH, i, flags, t_ini_s, track_vectors=None):
         flags.stop_reason_flag[i] = StopReasons.STOP_TRAP_NOT_REACHED
         return BBH, 0.0, t_ini_s, flags
     return stop_for_trap_not_reached(BBH, i, flags, t_ini_s, track_vectors)
-
-
-_stop_for_invalid_step = stop_for_invalid_step

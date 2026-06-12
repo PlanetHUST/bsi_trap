@@ -1,25 +1,23 @@
 from bsi_trap.classes.classes import (
     AGN_properties,
-    BBHEvolver,
+    BBHEvolverParams,
+    BBH_flags,
     BBH_properties,
     DiskProfile,
     Embedded_BH,
     MigrationParameters,
+    Single_BH_properties,
     TorqueProfile,
-    merger_flags,
-    single_BH_properties,
-    stellar_properties,
 )
 
 __all__ = [
     "AGN_properties",
-    "BBHEvolver",
+    "BBHEvolverParams",
+    "BBH_flags",
     "BBH_properties",
     "Embedded_BH",
     "DiskProfile",
     "MigrationParameters",
+    "Single_BH_properties",
     "TorqueProfile",
-    "merger_flags",
-    "single_BH_properties",
-    "stellar_properties",
 ]

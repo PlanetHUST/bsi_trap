@@ -2,29 +2,35 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Tuple
-
 import numpy as np
 
-from bsi_trap.classes import (
+from bsi_trap.classes.classes import (
     AGN_properties,
     BBH_properties,
     DiskProfile,
-    BBHEvolverParams,
-    single_BH_properties,
+    Embedded_BH,
+    Single_BH_properties,
 )
 
 from bsi_trap.config.model_config import ModelConfig
 from bsi_trap.main_class_op.embedded_BH_initialize import embedded_BH_initialize
-from bsi_trap.main_class_op.class_convert import embedded_to_BBH, BBH_to_ngen
+from bsi_trap.main_class_op.class_convert import embedded_to_BBH
 from bsi_trap.disk_profile.migration_torque import find_traps
 from bsi_trap.disk_profile.pagn_disk_adapter import build_pagn_disk_profile
 from bsi_trap.main_class_op.BH_params_initialize import BBH_params_initialize
+from bsi_trap.config.rng import resolve_seed, make_rng_streams
 
 
 @dataclass(frozen=True)
 class SampleWorkflowResult:
     output_file: str
+
+
+@dataclass(frozen=True)
+class TrapPopulation:
+    embedded_bh: Embedded_BH
+    binaries: BBH_properties
+    singles: Single_BH_properties
 
 
 def _build_environment(
@@ -42,14 +48,15 @@ def _build_environment(
     # 1. from pAGN get disk profile
     # QUESTION: model_config details for rin, rout et al. setting
     pagn_profile = build_pagn_disk_profile(
-        smbh_mass, alpha=model_config.alpha, n_resolution=model_config.disk_resolution
+        smbh_mass,
+        model=model_config.disk_model,
+        alpha=model_config.alpha,
+        n_resolution=model_config.disk_resolution,
     )
 
     # initialize trap radius
     # QUESTION: trap radius is mass dependent
-    r_trap_cm, r_antitrap_cm, torque_profile = find_traps(
-        pagn_profile.disk, model_config
-    )
+    r_trap_cm, r_antitrap_cm, torque_profile = find_traps(pagn_profile.disk)
 
     # build disk profile
     disk = DiskProfile(
@@ -69,44 +76,76 @@ def _build_environment(
     return agn, disk
 
 
-def initialize_to_trap(
+def initialize_trap_population(
     model_config: ModelConfig,
     agn: AGN_properties,
     disk: DiskProfile,
-    rng: np.random.Generator,
-) -> Tuple[BBH_properties, single_BH_properties, BBH_properties, single_BH_properties]:
+    rng_pair_up: np.random.Generator,
+    rng_nsc: np.random.Generator,
+    rng_orbit: np.random.Generator,
+    rng_spin: np.random.Generator,
+) -> TrapPopulation:
+    """Build the initial embedded, binary, and single BH trap populations."""
 
     # 1. initialize embedded BH properties
-    ebh = embedded_BH_initialize(agn, disk)
+    ebh = embedded_BH_initialize(agn, disk, rng_nsc)
 
     # 2. embedded BH to BBHs in trap
-    bbh_1g, sbh_1g = embedded_to_BBH(model_config, agn, disk, ebh)
+    bbh_1g, sbh_1g = embedded_to_BBH(
+        model_config,
+        agn,
+        disk,
+        ebh,
+        rng_pair_up,
+    )
 
     # random parameter filling (a,e,chi)
-    BBH_params_initialize(agn, disk, bbh_1g, rng)
+    BBH_params_initialize(
+        agn=agn,
+        disk=disk,
+        bbh=bbh_1g,
+        rng_orbit=rng_orbit,
+        rng_spin=rng_spin,
+        model_config=model_config,
+    )
 
-    # 3. hierarchical mergers
-    bbh_ng, sbh_ng = BBH_to_ngen()
-
-    return bbh_1g, sbh_1g, bbh_ng, sbh_ng
+    return TrapPopulation(
+        embedded_bh=ebh,
+        binaries=bbh_1g,
+        singles=sbh_1g,
+    )
 
 
 def run_physics_sample(
     model_config: ModelConfig,
     sample_index: int,
     smbh_mass: float,
-    seed: int,
     output_file: Path,
-    rng: np.random.Generator,
+    seed: int | None = None,
 ) -> SampleWorkflowResult:
-    """single physical task for one AGN-NSC sample"""
-    agn, disk = _build_environment(model_config, smbh_mass)
 
-    # 1. initialize bbh properties
-    bbh_1g, sbh_1g, bbh_ng, sbh_ng = initialize_to_trap(model_config, agn, disk, rng)
+    # 1. random seed generator
+    master_seed = resolve_seed(seed if seed is not None else model_config.master_seed)
+    sample_seed = master_seed if seed is not None else master_seed + sample_index
+    rng = make_rng_streams(sample_seed)
 
-    # 2. storage for the sample
+    # 2. build environment
+    agn, disk = _build_environment(
+        model_config=model_config,
+        smbh_mass=smbh_mass,
+    )
 
-    # 3. DETAIL for generation data get and storage
+    # 3. initialize trap population
+    initialize_trap_population(
+        model_config=model_config,
+        agn=agn,
+        disk=disk,
+        rng_pair_up=rng.pair_up,
+        rng_nsc=rng.nsc,
+        rng_orbit=rng.dynamics,
+        rng_spin=rng.spin,
+    )
 
-    return SampleWorkflowResult(output_file)
+    # 4. data storage
+
+    return SampleWorkflowResult(str(output_file))

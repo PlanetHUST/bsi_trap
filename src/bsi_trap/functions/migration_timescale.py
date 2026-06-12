@@ -1,7 +1,6 @@
 import numpy as np
 from bsi_trap.constant.constant import G, msun
 from bsi_trap.classes.classes import AGN_properties, DiskProfile
-from bsi_trap.disk_profile.migration_torque import compute_torque_profile
 
 
 def migration_timescale_torque(
@@ -14,10 +13,14 @@ def migration_timescale_torque(
     Fully vectorized migration timescale computation.
     Eliminates Python loops using masked 2D trapezoidal integration.
     """
-    torque_profile = compute_torque_profile(Disk)
-    gamma_total = torque_profile.gamma_tot  # shape (M,)
+    torque_profile = AGN.torque_profile
+    if torque_profile is None:
+        raise ValueError("AGN.torque_profile must be initialized before migration")
+
+    # pAGN torque is in SI; convert N m to erg for the CGS migration equation.
+    gamma_total = np.asarray(torque_profile.gamma_tot, dtype=float) * 1.0e7
     radius_cm = torque_profile.radius_cm  # shape (M,)
-    Omega = np.sqrt(G * AGN.M_SMBH * msun / radius_cm**3)  # shape (M,)
+    Omega = np.sqrt(G * AGN.M_SMBH_msun * msun / radius_cm**3)  # shape (M,)
 
     m_msun = np.atleast_1d(m_msun)[:, None]  # shape (N,1)
     R_ini_cm = np.atleast_1d(R_ini_cm)[:, None]  # shape (N,1)
@@ -54,13 +57,15 @@ def migration_timescale_torque(
     dx = np.diff(radius_cm)  # shape (M-1,)
 
     # Compute 1/dr_dt midpoints for trapezoid
-    dr_dt_mid = 0.5 * (1.0 / dr_dt[:, :-1] + 1.0 / dr_dt[:, 1:])  # shape (N, M-1)
+    inverse_speed_mid = 0.5 * (
+        np.abs(1.0 / dr_dt[:, :-1]) + np.abs(1.0 / dr_dt[:, 1:])
+    )  # shape (N, M-1)
 
     # Mask the midpoints: valid if both endpoints are valid
     mask_mid = radius_mask[:, :-1] & radius_mask[:, 1:]  # shape (N, M-1)
 
     # Apply trapezoidal integration
-    integral = np.sum(dr_dt_mid * dx[None, :] * mask_mid, axis=1)  # shape (N,)
+    integral = np.sum(inverse_speed_mid * dx[None, :] * mask_mid, axis=1)
 
     # Assign np.inf to invalid cases
     integral[invalid_mask] = np.inf

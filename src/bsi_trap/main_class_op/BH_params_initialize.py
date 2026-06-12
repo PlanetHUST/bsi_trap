@@ -18,17 +18,17 @@ def BBH_params_initialize(
     agn: AGN_properties,
     disk: DiskProfile,
     bbh: BBH_properties,
-    rng: np.random.Generator,
+    rng_orbit: np.random.Generator,
+    rng_spin: np.random.Generator,
     model_config: ModelConfig,
 ) -> None:
-    """random initialize {a,e,chi} for bbh"""
+    """Initialize BBH semimajor axes, eccentricities, and component spins."""
     num = bbh.num
-    bbh.ecc = sample_bbh_ecc(num, rng)
-    bbh.sma_cm = sample_bbh_semimajor(agn, disk, bbh)
-    bbh.chi1 = sample_spin_values(rng)
-    bbh.chi2 = sample_spin_values(rng)
-    bbh.th1 = sample_spin_tilts(bbh, model_config, rng)
-    bbh.th2 = sample_spin_tilts(bbh, model_config, rng)
+    bbh.ecc = sample_bbh_ecc(num, rng_orbit)
+    bbh.sma_cm = sample_bbh_semimajor(agn, disk, bbh, rng_orbit)
+    bbh.chi1 = sample_spin_values(num, rng_spin)
+    bbh.chi2 = sample_spin_values(num, rng_spin)
+    bbh.th1, bbh.th2 = sample_spin_tilts(num, model_config, rng_spin)
 
 
 def single_BH_params_initialize():
