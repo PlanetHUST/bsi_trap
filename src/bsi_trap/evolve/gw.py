@@ -1,7 +1,7 @@
 import numpy as np
 import logging
 
-from bsi_trap.classes.classes import (
+from bsi_trap.classes.models import (
     BBHEvolverParams,
     BBH_properties,
     AGN_properties,

@@ -1,4 +1,4 @@
-from bsi_trap.classes.classes import (
+from bsi_trap.classes.models import (
     AGN_properties,
     BBHEvolverParams,
     BBH_flags,
@@ -7,6 +7,7 @@ from bsi_trap.classes.classes import (
     Embedded_BH,
     MigrationParameters,
     Single_BH_properties,
+    TrapContext,
     TorqueProfile,
 )
 
@@ -19,5 +20,6 @@ __all__ = [
     "DiskProfile",
     "MigrationParameters",
     "Single_BH_properties",
+    "TrapContext",
     "TorqueProfile",
 ]

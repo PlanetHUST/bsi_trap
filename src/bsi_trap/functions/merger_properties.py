@@ -22,7 +22,7 @@ import numpy as np
 from numpy.random import Generator
 
 import bsi_trap.constant.constant as const
-from bsi_trap.classes.classes import AGN_properties, DiskProfile
+from bsi_trap.classes.models import AGN_properties, DiskProfile
 from bsi_trap.functions import jimenez as ji
 from bsi_trap.functions import nsc_population as nsc
 
@@ -203,7 +203,7 @@ def final_semimajor(
     if m_smbh_msun <= 0.0:
         raise ValueError(f"agn.M_SMBH_msun must be positive, got {m_smbh_msun}")
 
-    m_tot_g = (m_smbh_msun + nsc.mass_R_NSC(m_smbh_msun, r_trap_cm)) * const.msun
+    m_tot_g = (m_smbh_msun + nsc.mass_enclosed_NSC(m_smbh_msun, r_trap_cm)) * const.msun
 
     if m_tot_g <= 0.0:
         raise ValueError(f"Total enclosed mass must be positive, got {m_tot_g}")

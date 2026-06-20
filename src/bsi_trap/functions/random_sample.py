@@ -3,7 +3,7 @@ from numpy.random import Generator
 from typing import Tuple
 
 from bsi_trap.config.model_config import ModelConfig
-from bsi_trap.classes.classes import AGN_properties, DiskProfile, BBH_properties
+from bsi_trap.classes.models import AGN_properties, DiskProfile, BBH_properties
 from bsi_trap.constant.constant import Rsun
 
 
@@ -40,9 +40,7 @@ def sample_bbh_semimajor(
 
     a_min_cm = Rsun
     max_total_mass_msun = float(np.max(total_mass_msun))
-    a_max_cm = disk.r_trap_cm * (
-        max_total_mass_msun / AGN.M_SMBH_msun
-    ) ** (1.0 / 3.0)
+    a_max_cm = disk.r_trap_cm * (max_total_mass_msun / AGN.M_SMBH_msun) ** (1.0 / 3.0)
     if not np.isfinite(a_max_cm) or a_max_cm <= a_min_cm:
         raise ValueError(
             "The trap Hill radius must exceed one solar radius for BBH sampling"
@@ -50,9 +48,7 @@ def sample_bbh_semimajor(
 
     power = 11.0 / 2.0
     u = rng.random(bbh.num)
-    return (
-        a_min_cm**power + u * (a_max_cm**power - a_min_cm**power)
-    ) ** (1.0 / power)
+    return (a_min_cm**power + u * (a_max_cm**power - a_min_cm**power)) ** (1.0 / power)
 
 
 def sample_spin_values(num: int, rng: Generator, rms=0.1) -> np.ndarray:
@@ -113,27 +109,3 @@ def sample_embedded_radius(
     u = rng.random(N)
     sma = (rmin_pow + u * (rmax_pow - rmin_pow)) ** (1 / gamma1)
     return sma
-
-
-# def semimajor_out_random_linear(N, AGN, min_index, max_index):
-#     rg = AGN.rg
-#     rmin = 10**min_index * rg
-#     rmax = 10**max_index * rg
-#     u = np.random.random(N)
-#     sma = u * (rmax - rmin) + rmin  # Linear interpolation
-#     return sma
-
-
-# # Alternative (uniform logarithmic):
-# def semimajor_out_random_log(N, AGN, min_index, max_index):
-#     rg = AGN.rg
-#     u = np.random.random(N)
-#     log_sma = u * (max_index - min_index) + min_index  # Linear in log space
-#     sma = 10**log_sma * rg  # Convert back to linear
-#     return sma
-
-
-# def fBH_sample():
-#     """sample the BH fraction in the nsc with Gaussion distribution"""
-#     val = np.random.normal(loc=0.04, scale=0.01)
-#     return float(np.clip(val, 0.0, 1.0))

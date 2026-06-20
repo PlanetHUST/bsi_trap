@@ -3,22 +3,25 @@
 import numpy as np
 
 import bsi_trap.constant.constant as const
-from bsi_trap.classes.classes import AGN_properties, DiskProfile
+from bsi_trap.classes.models import AGN_properties, DiskProfile
 
 gamma = 1.3
 
 
-def t_relax(M_SMBH, R):
-    mave_msun = 1
+def t_relax(M_SMBH_msun: float, R_cm: float) -> float:
+    mave_msun = 1.0
     mave_g = mave_msun * const.msun
-    number_R = number_R_NSC(M_SMBH, mave_msun, R)
-    logGamma = 10
-    trelax_s = (
+    n_cm3 = number_density_NSC(M_SMBH_msun, mave_msun, R_cm)
+    logGamma = 10.0
+
+    if n_cm3 <= 0.0:
+        raise ValueError(f"NSC number density must be positive, got {n_cm3}")
+
+    return (
         0.34
-        * velocity_disp(M_SMBH) ** 3
-        / (const.G**2 * mave_g**2 * number_R * logGamma)
+        * velocity_dispersion(M_SMBH_msun) ** 3
+        / (const.G**2 * mave_g**2 * n_cm3 * logGamma)
     )
-    return trelax_s
 
 
 def velocity_dispersion(M_smbh_msun: float) -> float:
@@ -47,7 +50,7 @@ def influential_radius(M_SMBH_msun: float) -> float:
     return const.G * M_SMBH_msun * const.msun * velocity_disp(M_SMBH_msun) ** (-2)
 
 
-def mass_R_NSC(M_SMBH_msun: float, R_cm: float, gamma: float = 1.3) -> float:
+def mass_enclosed_NSC(M_SMBH_msun: float, R_cm: float, gamma: float = 1.3) -> float:
 
     rm_cm = influential_radius(M_SMBH_msun)
 
@@ -58,20 +61,40 @@ def mass_R_NSC(M_SMBH_msun: float, R_cm: float, gamma: float = 1.3) -> float:
     return m_enclosed_msun
 
 
-def number_R_NSC(
-    M_SMBH_msun: float, mave_msun: float, R_cm: float, gamma: float = 1.3
-) -> int:
-    # number enclosed in R_cm
-    mave_g = mave_msun * const.msun
-    M_SMBH_g = M_SMBH_msun * const.msun
+def number_enclosed_NSC(
+    M_SMBH_msun: float,
+    mave_msun: float,
+    R_cm: float,
+    gamma: float = 1.3,
+) -> float:
+    """Expected enclosed number of NSC objects inside R_cm."""
+    return mass_enclosed_NSC(M_SMBH_msun, R_cm, gamma) / mave_msun
+
+
+def number_density_NSC(
+    M_SMBH_msun: float,
+    mave_msun: float,
+    R_cm: float,
+    gamma: float = 1.3,
+) -> float:
+    """Return local NSC number density n(R) in cm^-3."""
+    if M_SMBH_msun <= 0:
+        raise ValueError(f"M_SMBH_msun must be positive, got {M_SMBH_msun}")
+    if mave_msun <= 0:
+        raise ValueError(f"mave_msun must be positive, got {mave_msun}")
+    if R_cm <= 0:
+        raise ValueError(f"R_cm must be positive, got {R_cm}")
+
     rm_cm = influential_radius(M_SMBH_msun)
-    number = (
-        ((3 - gamma) * M_SMBH_g)
-        / (2 * np.pi * mave_g)
-        * rm_cm ** (-3)
+
+    rho_msun_cm3 = (
+        (3.0 - gamma)
+        * nsc_mass(M_SMBH_msun)
+        / (4.0 * np.pi * rm_cm**3)
         * (R_cm / rm_cm) ** (-gamma)
     )
-    return int(number)
+
+    return rho_msun_cm3 / mave_msun
 
 
 def velocity_disp(M_SMBH_msun: float) -> float:
@@ -82,6 +105,6 @@ def velocity_disp(M_SMBH_msun: float) -> float:
 def vesc(AGN: AGN_properties, disk: DiskProfile):
     Msmbh_msun = AGN.M_SMBH_msun
 
-    M_tot_msun = Msmbh_msun + mass_R_NSC(Msmbh_msun, disk.r_trap_cm)
+    M_tot_msun = Msmbh_msun + mass_enclosed_NSC(Msmbh_msun, disk.r_trap_cm)
     vesc = np.sqrt(2 * const.G * (M_tot_msun * const.msun) / disk.r_trap_cm)
     return vesc, M_tot_msun

@@ -1,6 +1,12 @@
 from workflow.parallel_manager import run_simulation_workflow
 from workflow.analysis import run_analysis_workflow
-from workflow.plot_workflow import run_plotting_workflow
+
+
+def run_plotting_workflow(*args, **kwargs):
+    """Load plotting dependencies only when the plotting workflow is requested."""
+    from workflow.plot_workflow import run_plotting_workflow as _run_plotting_workflow
+
+    return _run_plotting_workflow(*args, **kwargs)
 
 __all__ = [
     "run_simulation_workflow",

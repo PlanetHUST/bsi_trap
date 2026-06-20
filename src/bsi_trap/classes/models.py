@@ -1,5 +1,14 @@
+"""Core disk, population, and trap-domain models."""
+
+from __future__ import annotations
+
 import numpy as np
+import numpy.typing as npt
 from dataclasses import dataclass
+
+
+FloatArray = npt.NDArray[np.float64]
+IntArray = npt.NDArray[np.int64]
 
 ######### Environment Global Parameters ##########
 
@@ -60,8 +69,21 @@ class DiskProfile:
             return int(left)
         return int(right)
 
-    def get_h(self, r_cm: float) -> float:
+    def get_h_over_r(self, r_cm: float) -> float:
+        """Return the local disk aspect ratio H/R."""
         return float(self.h_over_r[self.closest_index(r_cm)])
+
+    def get_scale_height_cm(self, r_cm: float) -> float:
+        """Return the local gas scale height H in cm."""
+        return self.get_h_over_r(r_cm) * r_cm
+
+    def get_h(self, r_cm: float) -> float:
+        """Return the local disk aspect ratio H/R.
+
+        Kept for existing migration code. New dimensional calculations should
+        call :meth:`get_scale_height_cm` explicitly.
+        """
+        return self.get_h_over_r(r_cm)
 
     def get_sigma(self, r_cm: float) -> float:
         return float(self.sigma_cgs[self.closest_index(r_cm)])
@@ -101,22 +123,37 @@ class TorqueProfile:
 
 
 class Embedded_BH(object):
-    """embedded BHs in in the disk"""
+    """Embedded-BH reservoir and its initial trap-population state.
 
-    def __init__(self, num):
-        self.num = num
-        self.m_msun = np.zeros(num, float)
-        self.t_form_s = np.zeros(num, float)
-        self.t_ini_s = np.zeros(num, float)
-        self.R_cm = np.zeros(num, float)
-        self.trap_flag = np.zeros(
-            num, int
-        )  # -1: trap not reach; -2: single stars; 0-num: binary pair-up with index
+    ``trap_flag`` records the state after initial pairing:
+    ``-1`` did not reach the trap, ``-2`` reached but remains single, and a
+    non-negative value is the index of the selected binary companion.
+    ``t_pair_s`` is the shared BBH formation time for paired entries and NaN
+    for all others.
+    """
 
-    def init_ebh(self, m_msun, t_form_s, R_cm):
-        m_msun = np.asarray(m_msun, dtype=float)
-        t_form_s = np.asarray(t_form_s, dtype=float)
-        R_cm = np.asarray(R_cm, dtype=float)
+    def __init__(self, num: int):
+        if num < 0:
+            raise ValueError("Embedded-BH population size must be nonnegative")
+
+        self.num: int = num
+        self.m_msun: FloatArray = np.zeros(num, dtype=np.float64)
+        self.t_form_s: FloatArray = np.zeros(num, dtype=np.float64)
+        self.t_mig_s: FloatArray = np.zeros(num, dtype=np.float64)
+        self.t_reach_s: FloatArray = np.zeros(num, dtype=np.float64)
+        self.t_pair_s: FloatArray = np.full(num, np.nan, dtype=np.float64)
+        self.R_cm: FloatArray = np.zeros(num, dtype=np.float64)
+        self.trap_flag: IntArray = np.full(num, -1, dtype=np.int64)
+
+    def init_ebh(
+        self,
+        m_msun: npt.ArrayLike,
+        t_form_s: npt.ArrayLike,
+        R_cm: npt.ArrayLike,
+    ) -> None:
+        m_msun = np.asarray(m_msun, dtype=np.float64)
+        t_form_s = np.asarray(t_form_s, dtype=np.float64)
+        R_cm = np.asarray(R_cm, dtype=np.float64)
         if not (len(m_msun) == len(t_form_s) == len(R_cm) == self.num):
             raise ValueError(
                 "Embedded-BH arrays must all match the declared population size "
@@ -222,5 +259,17 @@ class MigrationParameters:
 
 
 class TrapContext:
-    def __init__(self):
-        pass
+    """Local trap geometry used by the initial pairing event model.
+
+    Parameters are all CGS quantities. ``volumn_cgs`` remains as a temporary
+    compatibility alias for existing code; use ``volume_cm3`` in new code.
+    """
+
+    def __init__(self, width_cm: float, scale_height_cm: float, volume_cm3: float):
+        if width_cm <= 0.0 or scale_height_cm <= 0.0 or volume_cm3 <= 0.0:
+            raise ValueError("TrapContext dimensions and volume must be positive")
+
+        self.width_cm = float(width_cm)
+        self.scale_height_cm = float(scale_height_cm)
+        self.volume_cm3 = float(volume_cm3)
+        self.volumn_cgs = self.volume_cm3

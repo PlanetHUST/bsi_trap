@@ -1,5 +1,5 @@
 import numpy as np
-from bsi_trap.classes.classes import (
+from bsi_trap.classes.models import (
     BBH_properties,
     AGN_properties,
     Single_BH_properties,

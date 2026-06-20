@@ -2,7 +2,7 @@ import numpy as np
 
 import bsi_trap.constant.constant as const
 from bsi_trap.constant.stop_reason import StopReasons
-from bsi_trap.classes.classes import (
+from bsi_trap.classes.models import (
     BBH_properties,
     DiskProfile,
     AGN_properties,

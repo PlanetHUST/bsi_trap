@@ -2,7 +2,7 @@
 import numpy as np
 
 from bsi_trap.evolve.gw import ode_gw_only
-from bsi_trap.classes.classes import (
+from bsi_trap.classes.models import (
     BBHEvolverParams,
     BBH_properties,
     DiskProfile,

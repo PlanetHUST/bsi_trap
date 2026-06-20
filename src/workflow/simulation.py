@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import numpy as np
 
-from bsi_trap.classes.classes import (
+from bsi_trap.classes.models import (
     AGN_properties,
     BBH_properties,
     DiskProfile,
@@ -13,11 +13,11 @@ from bsi_trap.classes.classes import (
 )
 
 from bsi_trap.config.model_config import ModelConfig
-from bsi_trap.main_class_op.embedded_BH_initialize import embedded_BH_initialize
-from bsi_trap.main_class_op.class_convert import embedded_to_BBH
+from bsi_trap.main_class_op.embedded_population import embedded_BH_initialize
+from bsi_trap.main_class_op.initial_trap_population import construct_initial_trap_condition
 from bsi_trap.disk_profile.migration_torque import find_traps
 from bsi_trap.disk_profile.pagn_disk_adapter import build_pagn_disk_profile
-from bsi_trap.main_class_op.BH_params_initialize import BBH_params_initialize
+from bsi_trap.functions.BH_params_initialize import BBH_params_initialize
 from bsi_trap.config.rng import resolve_seed, make_rng_streams
 
 
@@ -91,12 +91,12 @@ def initialize_trap_population(
     ebh = embedded_BH_initialize(agn, disk, rng_nsc)
 
     # 2. embedded BH to BBHs in trap
-    bbh_1g, sbh_1g = embedded_to_BBH(
-        model_config,
-        agn,
-        disk,
-        ebh,
-        rng_pair_up,
+    bbh_1g, sbh_1g = construct_initial_trap_condition(
+        model_config=model_config,
+        agn=agn,
+        disk=disk,
+        ebh=ebh,
+        rng_pair_up=rng_pair_up,
     )
 
     # random parameter filling (a,e,chi)

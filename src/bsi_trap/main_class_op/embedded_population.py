@@ -1,15 +1,17 @@
+"""Construction of the embedded black-hole population."""
+
 from pathlib import Path
 from typing import Tuple
 
 import numpy as np
 
-from bsi_trap.classes.classes import (
+from bsi_trap.classes.models import (
     AGN_properties,
     DiskProfile,
     Embedded_BH,
 )
 from bsi_trap.constant.constant import Myr
-from bsi_trap.functions.nsc_population import number_R_NSC
+from bsi_trap.functions.nsc_population import number_enclosed_NSC
 from bsi_trap.functions.random_sample import sample_embedded_radius
 
 DEFAULT_STELLAR_CATALOG = (
@@ -27,12 +29,16 @@ def load_filtered_stellar_population(
         catalog_path, usecols=(1, 2, 3), skip_header=3, unpack=True
     )
 
-    ok = np.isfinite(m1iii) & np.isfinite(tformii) & (m1iii > 0.0)
-    ok &= (m1iii <= 30.0) & (tformii >= 0.0) & (tformii < 100.0)
-    if not np.any(ok):
+    selected_mass = np.isfinite(m1iii) & np.isfinite(tformii) & (m1iii > 0.0)
+    selected_mass &= (m1iii <= 30.0) & (tformii >= 0.0) & (tformii < 100.0)
+    if not np.any(selected_mass):
         raise ValueError(f"No valid black-hole remnants found in {catalog_path}")
 
-    return np.copy(mzams[ok]), np.copy(m1iii[ok]), np.copy(tformii[ok])
+    return (
+        np.copy(mzams[selected_mass]),
+        np.copy(m1iii[selected_mass]),
+        np.copy(tformii[selected_mass]),
+    )
 
 
 def embedded_BH_initialize(
@@ -47,9 +53,14 @@ def embedded_BH_initialize(
 
     r_out_cm = disk.r_out_cm
     mave_msun = agn.mave_msun
+    M_SMBH_msun = agn.M_SMBH_msun
 
     # 1. calculate the number of embedded BHs
-    number_ebh = number_R_NSC(agn.M_SMBH_msun, mave_msun, r_out_cm)
+    number_ebh_get = number_enclosed_NSC(M_SMBH_msun, mave_msun, r_out_cm)
+
+    # add safe check boundary
+    number_ebh = max(1, int(round(number_ebh_get)))
+
     if number_ebh < 0:
         raise ValueError(
             f"Embedded-BH population size must be nonnegative, got {number_ebh}"
