@@ -39,16 +39,19 @@ def sample_bbh_semimajor(
         raise ValueError("BBH component masses must be positive")
 
     a_min_cm = Rsun
-    max_total_mass_msun = float(np.max(total_mass_msun))
-    a_max_cm = disk.r_trap_cm * (max_total_mass_msun / AGN.M_SMBH_msun) ** (1.0 / 3.0)
-    if not np.isfinite(a_max_cm) or a_max_cm <= a_min_cm:
+    a_max_cm = disk.r_trap_cm * (
+        total_mass_msun / AGN.M_SMBH_msun
+    ) ** (1.0 / 3.0)
+    if np.any(~np.isfinite(a_max_cm)) or np.any(a_max_cm <= a_min_cm):
         raise ValueError(
             "The trap Hill radius must exceed one solar radius for BBH sampling"
         )
 
     power = 11.0 / 2.0
     u = rng.random(bbh.num)
-    return (a_min_cm**power + u * (a_max_cm**power - a_min_cm**power)) ** (1.0 / power)
+    return (
+        a_min_cm**power + u * (a_max_cm**power - a_min_cm**power)
+    ) ** (1.0 / power)
 
 
 def sample_spin_values(num: int, rng: Generator, rms=0.1) -> np.ndarray:

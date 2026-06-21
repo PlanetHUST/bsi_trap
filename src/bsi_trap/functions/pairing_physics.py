@@ -12,28 +12,32 @@ from bsi_trap.constant.constant import G, c, msun
 def pair_up_timescale(disk: DiskProfile, m1_msun: float, m2_msun: float) -> float:
     """Return the gas-driven BBH pair-up delay in seconds.
 
-    This is the Qian--Lai dynamical-friction estimate evaluated at the
-    migration trap. Both component masses are in solar masses; disk quantities
-    are in CGS units. The result is a delay after a stochastic pair interaction,
-    not the interaction waiting time itself.
+    This is the gas dynamical-friction estimate evaluated at the migration
+    trap,
+
+    ``t_pair = 3 c_s^3 / (4 pi G^2 rho_g M_tot)``,
+
+    using the vertically averaged midplane density
+    ``rho_g = Sigma / (2 H)``. Both component masses are in solar masses; disk
+    quantities are in CGS units. The result is a delay after a stochastic pair
+    interaction, not the interaction waiting time itself.
     """
     if m1_msun <= 0.0 or m2_msun <= 0.0:
         raise ValueError("BBH component masses must be positive")
 
-    r_trap_cm = disk.r_trap_cm
-    sound_speed_cgs = disk.get_cs(r_trap_cm)
-    scale_height_cm = disk.get_scale_height_cm(r_trap_cm)
-    surface_density_cgs = disk.get_sigma(r_trap_cm)
+    trap_radius_cm = disk.r_trap_cm
+    sound_speed_cgs = disk.get_cs(trap_radius_cm)
+    scale_height_cm = disk.get_scale_height_cm(trap_radius_cm)
+    surface_density_cgs = disk.get_sigma(trap_radius_cm)
     if sound_speed_cgs <= 0.0 or scale_height_cm <= 0.0 or surface_density_cgs <= 0.0:
         raise ValueError("Trap disk sound speed, scale height, and density must be positive")
 
     total_mass_g = (m1_msun + m2_msun) * msun
+    midplane_density_cgs = surface_density_cgs / (2.0 * scale_height_cm)
     return float(
         3.0
         * sound_speed_cgs**3
-        * scale_height_cm
-        * r_trap_cm
-        / (4.0 * np.pi * G**2 * surface_density_cgs * total_mass_g)
+        / (4.0 * np.pi * G**2 * midplane_density_cgs * total_mass_g)
     )
 
 

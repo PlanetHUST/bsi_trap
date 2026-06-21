@@ -8,7 +8,11 @@ from bsi_trap.classes.models import DiskProfile, TrapContext
 from bsi_trap.config.model_config import ModelConfig
 
 
-def build_trap_context(disk: DiskProfile, model_config: ModelConfig) -> TrapContext:
+def build_trap_context(
+    disk: DiskProfile,
+    model_config: ModelConfig,
+    width_cm: float | None = None,
+) -> TrapContext:
     """Build the finite annular trap volume from explicit model parameters.
 
     The trap is represented as an annulus with
@@ -18,7 +22,10 @@ def build_trap_context(disk: DiskProfile, model_config: ModelConfig) -> TrapCont
     workflow boundary.
     """
     gas_scale_height_cm = disk.get_scale_height_cm(disk.r_trap_cm)
-    width_cm = model_config.trap_width_scale_heights * gas_scale_height_cm
+    if width_cm is None:
+        width_cm = model_config.trap_width_scale_heights * gas_scale_height_cm
+    if not np.isfinite(width_cm) or width_cm <= 0.0:
+        raise ValueError("Trap width must be finite and positive")
     compact_object_height_cm = (
         model_config.compact_object_scale_height_fraction * gas_scale_height_cm
     )

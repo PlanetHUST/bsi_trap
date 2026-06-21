@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 
 import bsi_trap.plots.style
-from bsi_trap.plots.disk_profile_interace import (
+from bsi_trap.plots.disk_profiles import (
     plot_disk_parameter_profiles,
     plot_disk_torque_profiles,
 )

@@ -13,11 +13,16 @@ from bsi_trap.classes.models import (
 )
 
 from bsi_trap.config.model_config import ModelConfig
-from bsi_trap.main_class_op.embedded_population import embedded_BH_initialize
-from bsi_trap.main_class_op.initial_trap_population import construct_initial_trap_condition
-from bsi_trap.disk_profile.migration_torque import find_traps
+from bsi_trap.evolve.trap_migration import (
+    find_catalog_median_reference_trap,
+)
+from bsi_trap.initialization.embedded_bh import (
+    embedded_BH_initialize,
+    load_filtered_stellar_population,
+)
+from bsi_trap.initialization.trap_population import construct_initial_trap_condition
 from bsi_trap.disk_profile.pagn_disk_adapter import build_pagn_disk_profile
-from bsi_trap.functions.BH_params_initialize import BBH_params_initialize
+from bsi_trap.initialization.bbh_parameters import BBH_params_initialize
 from bsi_trap.config.rng import resolve_seed, make_rng_streams
 
 
@@ -54,9 +59,16 @@ def _build_environment(
         n_resolution=model_config.disk_resolution,
     )
 
-    # initialize trap radius
-    # QUESTION: trap radius is mass dependent
-    r_trap_cm, r_antitrap_cm, torque_profile = find_traps(pagn_profile.disk)
+    _, catalog_mass_msun, _ = load_filtered_stellar_population()
+    (
+        r_trap_cm,
+        r_antitrap_cm,
+        torque_profile,
+        trap_reference_mass_msun,
+    ) = find_catalog_median_reference_trap(
+        pagn_profile.disk,
+        catalog_mass_msun,
+    )
 
     # build disk profile
     disk = DiskProfile(
@@ -72,6 +84,8 @@ def _build_environment(
 
     agn.disk_profile = disk
     agn.torque_profile = torque_profile
+    agn.pagn_disk = pagn_profile.disk
+    agn.trap_reference_mass_msun = trap_reference_mass_msun
 
     return agn, disk
 

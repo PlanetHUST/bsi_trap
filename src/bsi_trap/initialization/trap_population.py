@@ -13,9 +13,11 @@ from bsi_trap.classes.models import (
 )
 from bsi_trap.config.model_config import ModelConfig
 from bsi_trap.constant.constant import Myr
-from bsi_trap.evolve.trap_context import build_trap_context
+from bsi_trap.evolve.trap_migration import (
+    build_mass_dependent_trap_context,
+    resolve_mass_dependent_trap_migration,
+)
 from bsi_trap.evolve.pairing import construct_pairing_up_timeline
-from bsi_trap.functions.migration_timescale import migration_timescale_torque
 
 
 def _validate_embedded_population(ebh: Embedded_BH) -> None:
@@ -80,12 +82,12 @@ def construct_initial_trap_condition(
     if not np.isfinite(end_time_s) or end_time_s <= 0.0:
         raise ValueError("AGN lifetime must define a finite, positive end time")
 
-    migration_times_s = migration_timescale_torque(
-        m_msun=ebh.m_msun,
-        R_ini_cm=ebh.R_cm,
-        AGN=agn,
-        Disk=disk,
+    migration = resolve_mass_dependent_trap_migration(
+        agn=agn,
+        disk=disk,
+        ebh=ebh,
     )
+    migration_times_s = migration.migration_times_s
     if migration_times_s.shape != (ebh.num,):
         raise ValueError("Migration solver returned an invalid population shape")
     if np.any(np.isnan(migration_times_s)) or np.any(migration_times_s < 0.0):
@@ -93,9 +95,15 @@ def construct_initial_trap_condition(
 
     ebh.t_mig_s = migration_times_s
     ebh.t_reach_s = ebh.t_form_s + migration_times_s
+    ebh.r_trap_target_cm = migration.target_radii_cm
 
-    reached_mask = ebh.t_reach_s < end_time_s
-    trap_context = build_trap_context(disk, model_config)
+    reached_mask = migration.stable_mask & (ebh.t_reach_s < end_time_s)
+    ebh.trap_width_cm = migration.width_cm
+    trap_context = build_mass_dependent_trap_context(
+        disk,
+        model_config,
+        migration,
+    )
     construct_pairing_up_timeline(
         embedded_bh=ebh,
         reached_mask=reached_mask,

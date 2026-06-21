@@ -47,15 +47,24 @@ class TrapStateCollector:
     def __init__(self, num: int = 0):
         self.num = num
         self.t_s = np.zeros(self.num, float)
-        self.volumn_cm3 = np.zeros(self.num, float)
+        self.volume_cm3 = np.zeros(self.num, float)
         self.density_cgs = np.zeros(self.num, float)
         self.bbh_num = np.zeros(self.num, float)
         self.sbh_num = np.zeros(self.num, float)
 
+    @property
+    def volumn_cm3(self) -> np.ndarray:
+        """Compatibility alias for the historical misspelled volume field."""
+        return self.volume_cm3
+
+    @volumn_cm3.setter
+    def volumn_cm3(self, value: np.ndarray) -> None:
+        self.volume_cm3 = value
+
     def insert_state(self, t_s: float) -> int:
         """Insert an empty state at time ``t_s`` and return its array index."""
         position = int(np.searchsorted(self.t_s, t_s))
-        for name in ("t_s", "volumn_cm3", "density_cgs", "bbh_num", "sbh_num"):
+        for name in ("t_s", "volume_cm3", "density_cgs", "bbh_num", "sbh_num"):
             setattr(self, name, np.insert(getattr(self, name), position, 0.0))
 
         self.t_s[position] = t_s

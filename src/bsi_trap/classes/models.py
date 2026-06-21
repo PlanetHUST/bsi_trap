@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import numpy.typing as npt
 from dataclasses import dataclass
+from typing import Any
 
 
 FloatArray = npt.NDArray[np.float64]
@@ -23,6 +24,8 @@ class AGN_properties(object):
         self.mave_msun: float = 1.0
         self.disk_profile: DiskProfile | None = None
         self.torque_profile: TorqueProfile | None = None
+        self.pagn_disk: Any | None = None
+        self.trap_reference_mass_msun: float | None = None
 
 
 @dataclass(frozen=True)
@@ -143,6 +146,8 @@ class Embedded_BH(object):
         self.t_reach_s: FloatArray = np.zeros(num, dtype=np.float64)
         self.t_pair_s: FloatArray = np.full(num, np.nan, dtype=np.float64)
         self.R_cm: FloatArray = np.zeros(num, dtype=np.float64)
+        self.r_trap_target_cm: FloatArray = np.full(num, np.nan, dtype=np.float64)
+        self.trap_width_cm: float = np.nan
         self.trap_flag: IntArray = np.full(num, -1, dtype=np.int64)
 
     def init_ebh(

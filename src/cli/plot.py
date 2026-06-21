@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from workflow.plot import run_plotting_workflow
+from workflow import run_plotting_workflow
 
 
 def add_plot_parser(subparsers) -> None:

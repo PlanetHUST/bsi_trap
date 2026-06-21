@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
 import unittest
+from dataclasses import dataclass
 from pathlib import Path
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
@@ -22,14 +24,38 @@ import matplotlib.pyplot as plt
 
 from bsi_trap.config.model_config import ModelConfig
 from bsi_trap.config.rng import make_rng_streams
-from bsi_trap.constant.constant import AU, Myr
-from bsi_trap.classes.models import DiskProfile, Embedded_BH
+from bsi_trap.constant.constant import AU, G, Myr, msun
+from bsi_trap.classes.models import (
+    AGN_properties,
+    BBH_properties,
+    DiskProfile,
+    Embedded_BH,
+    Single_BH_properties,
+)
 from bsi_trap.evolve.pairing import construct_pairing_up_timeline
 from bsi_trap.evolve.trap_context import build_trap_context
-from bsi_trap.functions.nsc_population import number_enclosed_NSC
-from bsi_trap.main_class_op.initial_trap_population import init_bbh, init_sbh
+from bsi_trap.initialization.bbh_parameters import BBH_params_initialize
+from bsi_trap.functions.pairing_physics import pair_up_timescale
+from bsi_trap.functions.random_sample import sample_embedded_radius
+from bsi_trap.initialization.embedded_bh import load_filtered_stellar_population
+from bsi_trap.initialization.trap_population import (
+    construct_initial_trap_condition,
+    init_bbh,
+    init_sbh,
+)
 from bsi_trap.plots.fig_storage import ensure_dir, save_figure
 from workflow import simulation
+
+
+TEST_EMBEDDED_BH_NUM = 128
+TEST_PAIR_UP_ETA = 1.0e7
+
+
+@dataclass(frozen=True)
+class InitializedTrapPopulation:
+    embedded_bh: Embedded_BH
+    binaries: BBH_properties
+    singles: Single_BH_properties
 
 
 def _initialize_population(
@@ -37,52 +63,68 @@ def _initialize_population(
     smbh_mass_msun: float,
     agn_lifetime_myr: float,
     disk_resolution: int,
+    embedded_bh_num: int,
+    pair_up_eta: float,
     seed: int,
-):
+) -> tuple[ModelConfig, AGN_properties, DiskProfile, InitializedTrapPopulation]:
+    """Build a fixed-size reservoir and exercise only trap initialization."""
+    if embedded_bh_num < 1:
+        raise ValueError("embedded_bh_num must be positive")
+
     config = ModelConfig(
         model_name="trap-population-initialization-test",
         agn_lifetime_myr=agn_lifetime_myr,
         disk_resolution=disk_resolution,
+        pair_up_eta=pair_up_eta,
         master_seed=seed,
     )
     agn, disk = simulation._build_environment(config, smbh_mass=smbh_mass_msun)
     rng = make_rng_streams(seed)
-    population = simulation.initialize_trap_population(
+
+    _, catalog_mass_msun, catalog_tform_myr = load_filtered_stellar_population()
+    sample_idx = rng.nsc.integers(
+        0,
+        catalog_mass_msun.size,
+        size=embedded_bh_num,
+    )
+    ebh = Embedded_BH(embedded_bh_num)
+    ebh.init_ebh(
+        catalog_mass_msun[sample_idx],
+        catalog_tform_myr[sample_idx] * Myr,
+        sample_embedded_radius(embedded_bh_num, agn, disk, rng.nsc),
+    )
+    bbh, sbh = construct_initial_trap_condition(
         model_config=config,
         agn=agn,
         disk=disk,
+        ebh=ebh,
         rng_pair_up=rng.pair_up,
-        rng_nsc=rng.nsc,
+    )
+    BBH_params_initialize(
+        agn=agn,
+        disk=disk,
+        bbh=bbh,
         rng_orbit=rng.dynamics,
         rng_spin=rng.spin,
+        model_config=config,
     )
-    return config, agn, disk, population
+    return config, agn, disk, InitializedTrapPopulation(ebh, bbh, sbh)
 
 
 class TestInitialTrapCondition(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.config, cls.agn, cls.disk, cls.population = _initialize_population(
-            smbh_mass_msun=1.0e3,
+            smbh_mass_msun=1.0e6,
             agn_lifetime_myr=10.0,
             disk_resolution=64,
+            embedded_bh_num=TEST_EMBEDDED_BH_NUM,
+            pair_up_eta=TEST_PAIR_UP_ETA,
             seed=12345,
         )
 
-    def test_uses_population_size_from_enclosed_nsc(self) -> None:
-        expected = max(
-            1,
-            int(
-                round(
-                    number_enclosed_NSC(
-                        self.agn.M_SMBH_msun,
-                        self.agn.mave_msun,
-                        self.disk.r_out_cm,
-                    )
-                )
-            ),
-        )
-        self.assertEqual(self.population.embedded_bh.num, expected)
+    def test_uses_requested_embedded_bh_count(self) -> None:
+        self.assertEqual(self.population.embedded_bh.num, TEST_EMBEDDED_BH_NUM)
 
     def test_stores_migration_and_trap_arrival_times(self) -> None:
         ebh = self.population.embedded_bh
@@ -92,6 +134,15 @@ class TestInitialTrapCondition(unittest.TestCase):
         self.assertEqual(ebh.t_mig_s.shape, (ebh.num,))
         self.assertTrue(np.all(ebh.t_mig_s >= 0.0))
         np.testing.assert_array_equal(reached, ebh.trap_flag != -1)
+
+    def test_omits_bhs_without_stable_mass_dependent_traps(self) -> None:
+        ebh = self.population.embedded_bh
+        omitted = np.isnan(ebh.r_trap_target_cm)
+
+        self.assertGreater(np.count_nonzero(omitted), 0)
+        self.assertTrue(np.all(ebh.trap_flag[omitted] == -1))
+        self.assertTrue(np.all(np.isinf(ebh.t_mig_s[omitted])))
+        self.assertGreater(ebh.trap_width_cm, 0.0)
 
     def test_reached_population_is_conserved_during_conversion(self) -> None:
         ebh = self.population.embedded_bh
@@ -104,6 +155,22 @@ class TestInitialTrapCondition(unittest.TestCase):
         paired = ebh.trap_flag >= 0
         trap_arrival_s = ebh.t_form_s + ebh.t_mig_s
         self.assertTrue(np.all(ebh.t_pair_s[paired] >= trap_arrival_s[paired]))
+
+    def test_formed_bbhs_have_valid_initial_orbital_and_spin_properties(self) -> None:
+        bbh = self.population.binaries
+        hill_radius_cm = self.disk.r_trap_cm * (
+            (bbh.m1_msun + bbh.m2_msun) / self.agn.M_SMBH_msun
+        ) ** (1.0 / 3.0)
+
+        self.assertGreater(bbh.num, 0)
+        self.assertTrue(np.all(bbh.t_ini_s < self.agn.lifetime_myr * Myr))
+        self.assertTrue(np.all(bbh.sma_cm > 0.0))
+        self.assertTrue(np.all(bbh.sma_cm <= hill_radius_cm))
+        self.assertTrue(np.all((bbh.ecc >= 0.0) & (bbh.ecc < 1.0)))
+        self.assertTrue(np.all((bbh.chi1 >= 0.0) & (bbh.chi1 <= 1.0)))
+        self.assertTrue(np.all((bbh.chi2 >= 0.0) & (bbh.chi2 <= 1.0)))
+        self.assertTrue(np.all((bbh.th1 >= 0.0) & (bbh.th1 <= np.pi)))
+        self.assertTrue(np.all((bbh.th2 >= 0.0) & (bbh.th2 <= np.pi)))
 
 
 class TestPairingTimeline(unittest.TestCase):
@@ -161,6 +228,31 @@ class TestPairingTimeline(unittest.TestCase):
                 max(ebh.t_reach_s[first], ebh.t_reach_s[second]),
             )
 
+    def test_pair_up_timescale_uses_midplane_density(self) -> None:
+        _, disk, _, _ = self._pairing_inputs()
+        total_mass_msun = 30.0
+        sound_speed_cgs = disk.get_cs(disk.r_trap_cm)
+        scale_height_cm = disk.get_scale_height_cm(disk.r_trap_cm)
+        midplane_density_cgs = disk.get_sigma(disk.r_trap_cm) / (
+            2.0 * scale_height_cm
+        )
+        expected_s = (
+            3.0
+            * sound_speed_cgs**3
+            / (
+                4.0
+                * np.pi
+                * G**2
+                * midplane_density_cgs
+                * total_mass_msun
+                * msun
+            )
+        )
+
+        self.assertAlmostEqual(
+            pair_up_timescale(disk, 10.0, 20.0), expected_s
+        )
+
     def test_pairing_is_seed_reproducible_and_converts_population(self) -> None:
         first_ebh, first_times_s = self._build_pairing_timeline(seed=11)
         second_ebh, second_times_s = self._build_pairing_timeline(seed=11)
@@ -195,7 +287,12 @@ def _print_summary(label: str, values: np.ndarray, unit: str = "") -> None:
     )
 
 
-def _print_population_summary(agn, disk, population) -> None:
+def _print_population_summary(
+    model_config: ModelConfig,
+    agn: AGN_properties,
+    disk: DiskProfile,
+    population: InitializedTrapPopulation,
+) -> None:
     ebh = population.embedded_bh
     bbh = population.binaries
     sbh = population.singles
@@ -205,7 +302,9 @@ def _print_population_summary(agn, disk, population) -> None:
 
     print("\nPhysical trap-population initialization")
     print(f"  SMBH mass:                {agn.M_SMBH_msun:.3e} Msun")
-    print(f"  enclosed NSC population:  {ebh.num}")
+    print(f"  initialized embedded BHs: {ebh.num}")
+    print(f"  pair-up encounter scale:  {model_config.pair_up_eta:.3e} r_g")
+    print(f"  mass-dependent width:     {ebh.trap_width_cm:.3e} cm")
     print(f"  disk outer radius:         {disk.r_out_cm:.3e} cm")
     print(f"  reached migration trap:    {np.count_nonzero(reached)}")
     print(f"  BBHs / single BHs:         {bbh.num} / {sbh.num}")
@@ -238,102 +337,70 @@ def _print_population_summary(agn, disk, population) -> None:
     )
 
 
-def _hist(ax, values: np.ndarray, *, label: str, **kwargs) -> None:
-    values = _finite(values)
-    if values.size:
-        bins = max(1, min(30, int(np.ceil(np.sqrt(values.size)))))
-        ax.hist(values, bins=bins, label=label, **kwargs)
+def _legend_if_labeled(ax) -> None:
+    """Add a legend only when this diagnostic panel has plotted data."""
+    handles, _ = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend()
 
 
 def _plot_population_diagnostics(
-    agn,
     population,
     output_dir: Path,
 ) -> list[Path]:
     ebh = population.embedded_bh
     bbh = population.binaries
-    sbh = population.singles
-    trap_arrival_s = ebh.t_form_s + ebh.t_mig_s
     reached = ebh.trap_flag != -1
-    paired = ebh.trap_flag >= 0
     output_dir = ensure_dir(output_dir)
-    paths = []
-
-    fig, axes = plt.subplots(1, 3, figsize=(17, 5))
-    _hist(axes[0], ebh.m_msun, label="Embedded BH", alpha=0.65)
-    _hist(axes[0], bbh.m1_msun, label="BBH primary", alpha=0.65)
-    _hist(axes[0], bbh.m2_msun, label="BBH secondary", alpha=0.65)
-    _hist(axes[0], sbh.m_msun, label="Single at trap", alpha=0.65)
-    axes[0].set_xlabel(r"Mass ($M_\odot$)")
-    axes[0].set_ylabel("Count")
-    axes[0].legend()
-
-    _hist(axes[1], bbh.chi1, label=r"$\chi_1$", alpha=0.65)
-    _hist(axes[1], bbh.chi2, label=r"$\chi_2$", alpha=0.65)
-    axes[1].set_xlabel("Dimensionless spin magnitude")
-    axes[1].set_ylabel("Count")
-    axes[1].legend()
-
-    _hist(axes[2], bbh.th1, label=r"$\theta_1$", alpha=0.65)
-    _hist(axes[2], bbh.th2, label=r"$\theta_2$", alpha=0.65)
-    axes[2].set_xlabel("Spin tilt (rad)")
-    axes[2].set_ylabel("Count")
-    axes[2].legend()
-    paths.append(save_figure(fig, output_dir, "population_mass_spin_histograms"))
-
-    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
-    _hist(axes[0], bbh.sma_cm / AU, label="BBH", alpha=0.75)
-    axes[0].set_xlabel("BBH semimajor axis (AU)")
-    axes[0].set_ylabel("Count")
-    if np.any(bbh.sma_cm > 0.0):
-        axes[0].set_xscale("log")
-    axes[0].legend()
-
-    _hist(axes[1], bbh.ecc, label="BBH", alpha=0.75)
-    axes[1].set_xlabel("BBH eccentricity")
-    axes[1].set_ylabel("Count")
-    axes[1].legend()
-    paths.append(save_figure(fig, output_dir, "population_orbit_histograms"))
-
-    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
-    _hist(
-        axes[0],
-        trap_arrival_s[reached] / Myr,
-        label="Reached BHs",
-        alpha=0.75,
+    arrival_times_s = np.sort(ebh.t_reach_s[reached])
+    pairing_times_s = np.sort(bbh.t_ini_s)
+    event_times_s = np.concatenate((arrival_times_s, pairing_times_s))
+    event_kind = np.concatenate(
+        (
+            np.zeros(arrival_times_s.size, dtype=int),
+            np.ones(pairing_times_s.size, dtype=int),
+        )
     )
-    axes[0].axvline(
-        agn.lifetime_myr,
-        color="black",
-        linestyle="--",
-        label="AGN lifetime",
-    )
-    axes[0].set_xlabel("Trap arrival time (Myr)")
-    axes[0].set_ylabel("Count")
-    axes[0].legend()
+    order = np.lexsort((event_kind, event_times_s))
+    event_times_myr = event_times_s[order] / Myr
+    single_count = np.cumsum(np.where(event_kind[order] == 0, 1, -2))
+    binary_count = np.cumsum(np.where(event_kind[order] == 1, 1, 0))
 
-    _hist(axes[1], ebh.t_form_s / Myr, label=r"$t_{\rm form}$", alpha=0.55)
-    _hist(axes[1], ebh.t_mig_s / Myr, label=r"$t_{\rm mig}$", alpha=0.55)
-    _hist(
-        axes[1],
-        trap_arrival_s[reached] / Myr,
-        label=r"$t_{\rm reach}$",
-        histtype="step",
-        linewidth=2,
-    )
-    _hist(
-        axes[1],
-        ebh.t_pair_s[paired] / Myr,
-        label=r"$t_{\rm pair}$",
-        histtype="step",
-        linewidth=2,
-    )
-    axes[1].set_xlabel("Timescale (Myr)")
-    axes[1].set_ylabel("Count")
-    axes[1].legend()
-    paths.append(save_figure(fig, output_dir, "population_time_histograms"))
+    fig, axes = plt.subplots(5, 1, figsize=(11, 15), sharex=True)
+    axes[0].step(event_times_myr, single_count, where="post", label="Trap singles")
+    axes[0].step(event_times_myr, binary_count, where="post", label="Trap BBHs")
+    axes[0].set_ylabel("Objects")
+    axes[0].set_title("Initial trap-population timeline")
+    _legend_if_labeled(axes[0])
 
-    return paths
+    pairing_times_myr = pairing_times_s / Myr
+    if bbh.num:
+        axes[1].scatter(pairing_times_myr, bbh.sma_cm / AU, label="BBH")
+        axes[1].set_yscale("log")
+        axes[2].scatter(pairing_times_myr, bbh.ecc, label="BBH")
+        axes[3].scatter(pairing_times_myr, bbh.chi1, label=r"$\chi_1$")
+        axes[3].scatter(pairing_times_myr, bbh.chi2, label=r"$\chi_2$")
+        axes[4].scatter(pairing_times_myr, bbh.th1, label=r"$\theta_1$")
+        axes[4].scatter(pairing_times_myr, bbh.th2, label=r"$\theta_2$")
+        for ax in axes[1:]:
+            _legend_if_labeled(ax)
+    else:
+        for ax in axes[1:]:
+            ax.text(
+                0.5,
+                0.5,
+                "No BBHs formed during the selected AGN lifetime",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+            )
+
+    axes[1].set_ylabel("BBH semimajor axis (AU)")
+    axes[2].set_ylabel("BBH eccentricity")
+    axes[3].set_ylabel("Spin magnitude")
+    axes[4].set_ylabel("Spin tilt (rad)")
+    axes[4].set_xlabel("Event time (Myr)")
+    return [save_figure(fig, output_dir, "trap_population_timeline")]
 
 
 def run_diagnostics(
@@ -341,17 +408,21 @@ def run_diagnostics(
     smbh_mass_msun: float,
     agn_lifetime_myr: float,
     disk_resolution: int,
+    embedded_bh_num: int,
+    pair_up_eta: float,
     seed: int,
     output_dir: Path,
 ) -> None:
-    _, agn, disk, population = _initialize_population(
+    config, agn, disk, population = _initialize_population(
         smbh_mass_msun=smbh_mass_msun,
         agn_lifetime_myr=agn_lifetime_myr,
         disk_resolution=disk_resolution,
+        embedded_bh_num=embedded_bh_num,
+        pair_up_eta=pair_up_eta,
         seed=seed,
     )
-    _print_population_summary(agn, disk, population)
-    paths = _plot_population_diagnostics(agn, population, output_dir)
+    _print_population_summary(config, agn, disk, population)
+    paths = _plot_population_diagnostics(population, output_dir)
     print("\nSaved figures:")
     for path in paths:
         print(f"  {path}")
@@ -365,11 +436,18 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--smbh-mass-msun", type=float, default=1.0e6)
     parser.add_argument("--agn-lifetime-myr", type=float, default=10.0)
     parser.add_argument("--disk-resolution", type=int, default=256)
+    parser.add_argument("--embedded-bh-num", type=int, default=1_000)
+    parser.add_argument(
+        "--pair-up-eta",
+        type=float,
+        default=TEST_PAIR_UP_ETA,
+        help="effective encounter radius in gravitational radii (default: 1e7)",
+    )
     parser.add_argument("--seed", type=int, default=12345)
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("report/trap_population_initialization"),
+        default=Path("report/trap_population_timeline"),
     )
     return parser.parse_args()
 
@@ -377,10 +455,13 @@ def _parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = _parse_args()
     if args.diagnostic:
+        logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
         run_diagnostics(
             smbh_mass_msun=args.smbh_mass_msun,
             agn_lifetime_myr=args.agn_lifetime_myr,
             disk_resolution=args.disk_resolution,
+            embedded_bh_num=args.embedded_bh_num,
+            pair_up_eta=args.pair_up_eta,
             seed=args.seed,
             output_dir=args.output_dir,
         )

@@ -1,6 +1,6 @@
 import numpy as np
 from bsi_trap.constant.constant import G, msun
-from bsi_trap.classes.models import AGN_properties, DiskProfile
+from bsi_trap.classes.models import AGN_properties, DiskProfile, TorqueProfile
 
 
 def migration_timescale_torque(
@@ -8,9 +8,18 @@ def migration_timescale_torque(
     R_ini_cm: np.ndarray,  # shape (N,)
     AGN: AGN_properties,
     Disk: DiskProfile,
+    *,
+    torque_profile: TorqueProfile | None = None,
+    target_radius_cm: float | None = None,
 ) -> np.ndarray:
-    """Calculate migration times without allocating a population-by-radius grid."""
-    torque_profile = AGN.torque_profile
+    """Calculate migration times to one specified trap radius.
+
+    ``torque_profile`` must be evaluated for the same migrator mass as the
+    supplied population. When omitted, the AGN reference torque profile and
+    shared disk trap radius are used for backward compatibility.
+    """
+    if torque_profile is None:
+        torque_profile = AGN.torque_profile
     if torque_profile is None:
         raise ValueError("AGN.torque_profile must be initialized before migration")
 
@@ -23,11 +32,12 @@ def migration_timescale_torque(
     if m_msun.shape != R_ini_cm.shape:
         raise ValueError("m_msun and R_ini_cm must have the same shape")
 
-    r_trap = Disk.r_trap_cm
-    r_antitrap = Disk.r_antitrap_cm
-    target_radius = np.where(
-        R_ini_cm > r_trap, r_trap, np.where(R_ini_cm > r_antitrap, r_antitrap, np.nan)
-    )
+    if target_radius_cm is None:
+        target_radius_cm = Disk.r_trap_cm
+    if not np.isfinite(target_radius_cm) or target_radius_cm <= 0.0:
+        raise ValueError("target_radius_cm must be finite and positive")
+
+    target_radius = np.full(m_msun.shape, target_radius_cm, dtype=float)
     start = np.minimum(R_ini_cm, target_radius)
     stop = np.maximum(R_ini_cm, target_radius)
 
