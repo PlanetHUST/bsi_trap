@@ -17,12 +17,13 @@ class ModelConfig:
     disk_resolution: int = 256
 
     bsi_eta: float = 6.0
-    pair_up_eta: float = 10.0
+    pair_up_eta: float = 2.5
 
     # Initial trap geometry in units of the local gas scale height. These are
     # explicit model parameters so the pairing density is never hard-coded.
     trap_width_scale_heights: float = 1.0
     compact_object_scale_height_fraction: float = 1.0
+    trap_radial_dispersion_scale_heights: float = 0.25
 
     master_seed: int | None = 20260611
 

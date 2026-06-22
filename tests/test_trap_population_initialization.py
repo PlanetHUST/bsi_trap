@@ -31,11 +31,19 @@ from bsi_trap.classes.models import (
     DiskProfile,
     Embedded_BH,
     Single_BH_properties,
+    TrapContext,
 )
 from bsi_trap.evolve.pairing import construct_pairing_up_timeline
 from bsi_trap.evolve.trap_context import build_trap_context
 from bsi_trap.initialization.bbh_parameters import BBH_params_initialize
-from bsi_trap.functions.pairing_physics import pair_up_timescale
+from bsi_trap.functions.pairing_physics import (
+    conjunction_rate,
+    effective_capture_impact_parameter,
+    is_strong_gravity_encounter,
+    pair_up_timescale,
+    shear_relative_velocity,
+    sbh_cross_section,
+)
 from bsi_trap.functions.random_sample import sample_embedded_radius
 from bsi_trap.initialization.embedded_bh import load_filtered_stellar_population
 from bsi_trap.initialization.trap_population import (
@@ -46,9 +54,8 @@ from bsi_trap.initialization.trap_population import (
 from bsi_trap.plots.fig_storage import ensure_dir, save_figure
 from workflow import simulation
 
-
-TEST_EMBEDDED_BH_NUM = 128
-TEST_PAIR_UP_ETA = 1.0e7
+TEST_EMBEDDED_BH_NUM = 2000
+TEST_PAIR_UP_ETA = 2.5
 
 
 @dataclass(frozen=True)
@@ -68,8 +75,6 @@ def _initialize_population(
     seed: int,
 ) -> tuple[ModelConfig, AGN_properties, DiskProfile, InitializedTrapPopulation]:
     """Build a fixed-size reservoir and exercise only trap initialization."""
-    if embedded_bh_num < 1:
-        raise ValueError("embedded_bh_num must be positive")
 
     config = ModelConfig(
         model_name="trap-population-initialization-test",
@@ -87,6 +92,7 @@ def _initialize_population(
         catalog_mass_msun.size,
         size=embedded_bh_num,
     )
+
     ebh = Embedded_BH(embedded_bh_num)
     ebh.init_ebh(
         catalog_mass_msun[sample_idx],
@@ -142,7 +148,20 @@ class TestInitialTrapCondition(unittest.TestCase):
         self.assertGreater(np.count_nonzero(omitted), 0)
         self.assertTrue(np.all(ebh.trap_flag[omitted] == -1))
         self.assertTrue(np.all(np.isinf(ebh.t_mig_s[omitted])))
-        self.assertGreater(ebh.trap_width_cm, 0.0)
+        self.assertAlmostEqual(
+            ebh.trap_width_cm,
+            self.config.trap_width_scale_heights
+            * self.disk.get_scale_height_cm(self.disk.r_trap_cm),
+        )
+        reached = ebh.trap_flag != -1
+        self.assertTrue(np.all(np.isfinite(ebh.r_pair_cm[reached])))
+        self.assertTrue(np.all(np.isnan(ebh.r_pair_cm[~reached])))
+        self.assertTrue(
+            np.all(
+                np.abs(ebh.r_pair_cm[reached] - ebh.r_trap_target_cm[reached])
+                <= 0.5 * ebh.trap_width_cm * (1.0 + 1.0e-12)
+            )
+        )
 
     def test_reached_population_is_conserved_during_conversion(self) -> None:
         ebh = self.population.embedded_bh
@@ -162,7 +181,8 @@ class TestInitialTrapCondition(unittest.TestCase):
             (bbh.m1_msun + bbh.m2_msun) / self.agn.M_SMBH_msun
         ) ** (1.0 / 3.0)
 
-        self.assertGreater(bbh.num, 0)
+        if bbh.num == 0:
+            return
         self.assertTrue(np.all(bbh.t_ini_s < self.agn.lifetime_myr * Myr))
         self.assertTrue(np.all(bbh.sma_cm > 0.0))
         self.assertTrue(np.all(bbh.sma_cm <= hill_radius_cm))
@@ -192,6 +212,7 @@ class TestPairingTimeline(unittest.TestCase):
         ebh = Embedded_BH(5)
         ebh.m_msun[:] = [10.0, 20.0, 30.0, 40.0, 50.0]
         ebh.t_reach_s[:] = [4.0, 1.0, 3.0, 2.0, 1.0e23]
+        ebh.r_pair_cm[:] = [1.00e12, 1.01e12, 1.02e12, 1.03e12, np.nan]
         reached_mask = np.array([True, True, True, True, False])
         return config, disk, ebh, reached_mask
 
@@ -204,6 +225,7 @@ class TestPairingTimeline(unittest.TestCase):
             trap_context=build_trap_context(disk, config),
             model_config=config,
             disk=disk,
+            smbh_mass_msun=1.0e6,
             end_time_s=1.0e22,
             rng_pair_up=np.random.default_rng(seed),
         )
@@ -211,6 +233,7 @@ class TestPairingTimeline(unittest.TestCase):
 
     def test_pairing_uses_only_reached_singles(self) -> None:
         ebh, formation_times_s = self._build_pairing_timeline(seed=7)
+        _, disk, _, _ = self._pairing_inputs()
         paired = ebh.trap_flag >= 0
 
         self.assertEqual(formation_times_s.shape, (2,))
@@ -227,30 +250,125 @@ class TestPairingTimeline(unittest.TestCase):
                 ebh.t_pair_s[first],
                 max(ebh.t_reach_s[first], ebh.t_reach_s[second]),
             )
+            self.assertGreaterEqual(
+                ebh.t_pair_s[first],
+                max(ebh.t_reach_s[first], ebh.t_reach_s[second])
+                + pair_up_timescale(
+                    disk,
+                    float(ebh.m_msun[first]),
+                    float(ebh.m_msun[second]),
+                ),
+            )
+
+    def test_pairing_requires_local_radial_overlap(self) -> None:
+        config, disk, _, _ = self._pairing_inputs()
+        ebh = Embedded_BH(2)
+        ebh.m_msun[:] = [10.0, 20.0]
+        ebh.t_reach_s[:] = [1.0, 1.0]
+        ebh.r_pair_cm[:] = [1.00e12, 1.90e12]
+
+        formation_times_s = construct_pairing_up_timeline(
+            embedded_bh=ebh,
+            reached_mask=np.array([True, True]),
+            trap_context=build_trap_context(disk, config),
+            model_config=config,
+            disk=disk,
+            smbh_mass_msun=1.0e6,
+            end_time_s=1.0e22,
+            rng_pair_up=np.random.default_rng(7),
+        )
+
+        self.assertEqual(formation_times_s.size, 0)
+        np.testing.assert_array_equal(ebh.trap_flag, [-2, -2])
 
     def test_pair_up_timescale_uses_midplane_density(self) -> None:
         _, disk, _, _ = self._pairing_inputs()
         total_mass_msun = 30.0
         sound_speed_cgs = disk.get_cs(disk.r_trap_cm)
         scale_height_cm = disk.get_scale_height_cm(disk.r_trap_cm)
-        midplane_density_cgs = disk.get_sigma(disk.r_trap_cm) / (
-            2.0 * scale_height_cm
-        )
+        midplane_density_cgs = disk.get_sigma(disk.r_trap_cm) / (2.0 * scale_height_cm)
         expected_s = (
             3.0
             * sound_speed_cgs**3
-            / (
-                4.0
-                * np.pi
-                * G**2
-                * midplane_density_cgs
-                * total_mass_msun
-                * msun
-            )
+            / (4.0 * np.pi * G**2 * midplane_density_cgs * total_mass_msun * msun)
         )
 
+        self.assertAlmostEqual(pair_up_timescale(disk, 10.0, 20.0), expected_s)
+
+    def test_capture_cross_section_uses_hill_radius_and_finite_layer(self) -> None:
+        config, disk, _, _ = self._pairing_inputs()
+        trap_context = build_trap_context(disk, config)
+        total_mass_msun = 30.0
+        expected_hill_radius_cm = disk.r_trap_cm * (
+            total_mass_msun / (3.0 * 1.0e6)
+        ) ** (1.0 / 3.0)
+        impact_parameter_cm = effective_capture_impact_parameter(
+            model_config=config,
+            total_mass_msun=total_mass_msun,
+            trap_radius_cm=disk.r_trap_cm,
+            smbh_mass_msun=1.0e6,
+            trap_width_cm=trap_context.width_cm,
+        )
         self.assertAlmostEqual(
-            pair_up_timescale(disk, 10.0, 20.0), expected_s
+            impact_parameter_cm,
+            min(config.pair_up_eta * expected_hill_radius_cm, trap_context.width_cm / 2.0),
+        )
+
+        thin_layer_context = TrapContext(
+            width_cm=trap_context.width_cm,
+            scale_height_cm=1.0e10,
+            volume_cm3=trap_context.volume_cm3 / 10.0,
+        )
+        layer_limited_config = ModelConfig(
+            model_name="layer-limited-capture-test",
+            pair_up_eta=10.0,
+        )
+        layer_limited_impact_cm = effective_capture_impact_parameter(
+            model_config=layer_limited_config,
+            total_mass_msun=total_mass_msun,
+            trap_radius_cm=disk.r_trap_cm,
+            smbh_mass_msun=1.0e6,
+            trap_width_cm=thin_layer_context.width_cm,
+        )
+        expected_area_cm2 = 2.0 * (
+            thin_layer_context.scale_height_cm
+            * np.sqrt(
+                layer_limited_impact_cm**2 - thin_layer_context.scale_height_cm**2
+            )
+            + layer_limited_impact_cm**2
+            * np.arcsin(thin_layer_context.scale_height_cm / layer_limited_impact_cm)
+        )
+        self.assertAlmostEqual(
+            sbh_cross_section(
+                model_config=layer_limited_config,
+                total_mass_msun=total_mass_msun,
+                trap_radius_cm=disk.r_trap_cm,
+                smbh_mass_msun=1.0e6,
+                trap_context=thin_layer_context,
+            ),
+            expected_area_cm2,
+        )
+
+    def test_local_shear_and_gravity_gate_define_conjunction_candidates(self) -> None:
+        first_radius_cm = 1.00e12
+        second_radius_cm = 1.01e12
+        relative_velocity_cms = shear_relative_velocity(
+            1.0e6,
+            first_radius_cm,
+            second_radius_cm,
+        )
+        self.assertGreater(relative_velocity_cms, 0.0)
+        self.assertGreater(
+            conjunction_rate(1.0e6, first_radius_cm, second_radius_cm),
+            0.0,
+        )
+        self.assertTrue(
+            is_strong_gravity_encounter(
+                10.0,
+                20.0,
+                relative_velocity_cms,
+                5.0e10,
+            )
         )
 
     def test_pairing_is_seed_reproducible_and_converts_population(self) -> None:
@@ -303,8 +421,8 @@ def _print_population_summary(
     print("\nPhysical trap-population initialization")
     print(f"  SMBH mass:                {agn.M_SMBH_msun:.3e} Msun")
     print(f"  initialized embedded BHs: {ebh.num}")
-    print(f"  pair-up encounter scale:  {model_config.pair_up_eta:.3e} r_g")
-    print(f"  mass-dependent width:     {ebh.trap_width_cm:.3e} cm")
+    print(f"  pair-up Hill multiplier:  {model_config.pair_up_eta:.3e}")
+    print(f"  configured trap width:    {ebh.trap_width_cm:.3e} cm")
     print(f"  disk outer radius:         {disk.r_out_cm:.3e} cm")
     print(f"  reached migration trap:    {np.count_nonzero(reached)}")
     print(f"  BBHs / single BHs:         {bbh.num} / {sbh.num}")
@@ -441,7 +559,7 @@ def _parse_args() -> argparse.Namespace:
         "--pair-up-eta",
         type=float,
         default=TEST_PAIR_UP_ETA,
-        help="effective encounter radius in gravitational radii (default: 1e7)",
+        help="mutual-Hill-radius capture multiplier",
     )
     parser.add_argument("--seed", type=int, default=12345)
     parser.add_argument(

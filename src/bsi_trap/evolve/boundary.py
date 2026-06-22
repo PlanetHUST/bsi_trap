@@ -6,25 +6,25 @@ from bsi_trap.classes.models import (
     BBH_properties,
     DiskProfile,
     AGN_properties,
-    merger_flags,
+    BBH_flags,
 )
 from bsi_trap.evolve.physical_quantity import migration_threshold
 
 
 def stop_for_remanent_mass(
-    BBH: BBH_properties, flags: merger_flags, Disk: DiskProfile, AGN: AGN_properties
+    BBH: BBH_properties, flags: BBH_flags, Disk: DiskProfile, AGN: AGN_properties
 ):
     N = len(BBH.m1_msun)
 
     if BBH.mrem_msun is not None and N > 0:
-        typeii_threshold = migration_threshold(Disk, AGN, AGN.r_trap_cm)
+        typeii_threshold = migration_threshold(Disk, AGN, Disk.r_trap_cm)
         flags.stop_reason_flag[BBH.mrem_msun * const.msun > typeii_threshold] = (
             StopReasons.STOP_REMNANT_TRAP_OVERLOAD
         )
 
 
 def apply_hierarchical_boundaries(
-    BBH: BBH_properties, flags: merger_flags, Disk: DiskProfile, AGN: AGN_properties
+    BBH: BBH_properties, flags: BBH_flags, Disk: DiskProfile, AGN: AGN_properties
 ):
     pass
 

@@ -8,13 +8,11 @@ from typing import Any
 
 import numpy as np
 
-from bsi_trap.classes.models import AGN_properties, DiskProfile, Embedded_BH, TrapContext
-from bsi_trap.config.model_config import ModelConfig
+from bsi_trap.classes.models import AGN_properties, DiskProfile, Embedded_BH
 from bsi_trap.disk_profile.migration_torque import (
     classify_torque_crossings,
     find_traps,
 )
-from bsi_trap.evolve.trap_context import build_trap_context
 from bsi_trap.functions.migration_timescale import migration_timescale_torque
 
 
@@ -28,7 +26,6 @@ class TrapMigrationResult:
     migration_times_s: np.ndarray
     target_radii_cm: np.ndarray
     stable_mask: np.ndarray
-    width_cm: float
 
 
 def find_catalog_median_reference_trap(
@@ -42,25 +39,6 @@ def find_catalog_median_reference_trap(
         migrator_mass_msun=reference_mass_msun,
     )
     return r_trap_cm, r_antitrap_cm, torque_profile, reference_mass_msun
-
-
-def _mass_dependent_trap_width_cm(
-    disk: DiskProfile,
-    target_radii_cm: np.ndarray,
-    stable_mask: np.ndarray,
-) -> float:
-    """Return the full radial span of valid mass-dependent stable radii."""
-    stable_radii_cm = target_radii_cm[stable_mask]
-    if stable_radii_cm.size == 0:
-        raise ValueError("No initialized embedded BH has a stable migration trap")
-
-    width_cm = float(np.ptp(stable_radii_cm))
-    if width_cm > 0.0:
-        return width_cm
-
-    # A mono-mass population has no mass-induced span, but pairing still needs
-    # a finite annular volume. The local gas scale height is that geometric floor.
-    return disk.get_scale_height_cm(disk.r_trap_cm)
 
 
 def resolve_mass_dependent_trap_migration(
@@ -127,20 +105,14 @@ def resolve_mass_dependent_trap_migration(
                 target_radius_cm=target_radius_cm,
             )
 
-    width_cm = _mass_dependent_trap_width_cm(
-        disk,
-        target_radii_cm,
-        stable_mask,
-    )
     omitted_mask = ~stable_mask
     logger.info(
         "Mass-dependent trap selection: initialized=%d, stable=%d, "
-        "omitted_no_stable_trap=%d, center_cm=%.6e, width_cm=%.6e",
+        "omitted_no_stable_trap=%d, center_cm=%.6e",
         ebh.num,
         int(np.count_nonzero(stable_mask)),
         int(np.count_nonzero(omitted_mask)),
         disk.r_trap_cm,
-        width_cm,
     )
     if np.any(omitted_mask):
         omitted_masses_msun = ebh.m_msun[omitted_mask]
@@ -155,14 +127,4 @@ def resolve_mass_dependent_trap_migration(
         migration_times_s=migration_times_s,
         target_radii_cm=target_radii_cm,
         stable_mask=stable_mask,
-        width_cm=width_cm,
     )
-
-
-def build_mass_dependent_trap_context(
-    disk: DiskProfile,
-    model_config: ModelConfig,
-    migration: TrapMigrationResult,
-) -> TrapContext:
-    """Build the shared pairing volume from the resolved migration-width span."""
-    return build_trap_context(disk, model_config, width_cm=migration.width_cm)

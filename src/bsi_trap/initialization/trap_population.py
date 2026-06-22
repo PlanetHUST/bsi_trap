@@ -14,9 +14,9 @@ from bsi_trap.classes.models import (
 from bsi_trap.config.model_config import ModelConfig
 from bsi_trap.constant.constant import Myr
 from bsi_trap.evolve.trap_migration import (
-    build_mass_dependent_trap_context,
     resolve_mass_dependent_trap_migration,
 )
+from bsi_trap.evolve.trap_context import build_trap_context
 from bsi_trap.evolve.pairing import construct_pairing_up_timeline
 
 
@@ -98,18 +98,15 @@ def construct_initial_trap_condition(
     ebh.r_trap_target_cm = migration.target_radii_cm
 
     reached_mask = migration.stable_mask & (ebh.t_reach_s < end_time_s)
-    ebh.trap_width_cm = migration.width_cm
-    trap_context = build_mass_dependent_trap_context(
-        disk,
-        model_config,
-        migration,
-    )
+    trap_context = build_trap_context(disk, model_config)
+    ebh.trap_width_cm = trap_context.width_cm
     construct_pairing_up_timeline(
         embedded_bh=ebh,
         reached_mask=reached_mask,
         trap_context=trap_context,
         model_config=model_config,
         disk=disk,
+        smbh_mass_msun=agn.M_SMBH_msun,
         end_time_s=end_time_s,
         rng_pair_up=rng_pair_up,
     )

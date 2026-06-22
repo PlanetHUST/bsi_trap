@@ -147,6 +147,7 @@ class Embedded_BH(object):
         self.t_pair_s: FloatArray = np.full(num, np.nan, dtype=np.float64)
         self.R_cm: FloatArray = np.zeros(num, dtype=np.float64)
         self.r_trap_target_cm: FloatArray = np.full(num, np.nan, dtype=np.float64)
+        self.r_pair_cm: FloatArray = np.full(num, np.nan, dtype=np.float64)
         self.trap_width_cm: float = np.nan
         self.trap_flag: IntArray = np.full(num, -1, dtype=np.int64)
 
