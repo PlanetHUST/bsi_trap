@@ -58,11 +58,35 @@ TEST_EMBEDDED_BH_NUM = 2000
 TEST_PAIR_UP_ETA = 2.5
 
 
+# Test fixtures
+
+
 @dataclass(frozen=True)
 class InitializedTrapPopulation:
     embedded_bh: Embedded_BH
     binaries: BBH_properties
     singles: Single_BH_properties
+
+
+@dataclass(frozen=True)
+class PairTimelineData:
+    """Derived timestamps for the formed-BBH diagnostic timeline."""
+
+    first_idx: np.ndarray
+    second_idx: np.ndarray
+    migration_start_s: np.ndarray
+    arrival_s: np.ndarray
+    encounter_s: np.ndarray
+    formation_s: np.ndarray
+    pair_up_delay_s: np.ndarray
+
+
+@dataclass(frozen=True)
+class ReachedTrapIndexData:
+    """Arrival-ordered local indices for the reached trap population."""
+
+    global_indices: np.ndarray
+    local_index_by_global: np.ndarray
 
 
 def _initialize_population(
@@ -75,6 +99,10 @@ def _initialize_population(
     seed: int,
 ) -> tuple[ModelConfig, AGN_properties, DiskProfile, InitializedTrapPopulation]:
     """Build a fixed-size reservoir and exercise only trap initialization."""
+    if embedded_bh_num <= 0:
+        raise ValueError("embedded_bh_num must be positive")
+    if pair_up_eta <= 0.0:
+        raise ValueError("pair_up_eta must be positive")
 
     config = ModelConfig(
         model_name="trap-population-initialization-test",
@@ -131,6 +159,26 @@ class TestInitialTrapCondition(unittest.TestCase):
 
     def test_uses_requested_embedded_bh_count(self) -> None:
         self.assertEqual(self.population.embedded_bh.num, TEST_EMBEDDED_BH_NUM)
+
+    def test_rejects_invalid_diagnostic_population_parameters(self) -> None:
+        with self.assertRaisesRegex(ValueError, "embedded_bh_num must be positive"):
+            _initialize_population(
+                smbh_mass_msun=1.0e6,
+                agn_lifetime_myr=10.0,
+                disk_resolution=64,
+                embedded_bh_num=0,
+                pair_up_eta=TEST_PAIR_UP_ETA,
+                seed=12345,
+            )
+        with self.assertRaisesRegex(ValueError, "pair_up_eta must be positive"):
+            _initialize_population(
+                smbh_mass_msun=1.0e6,
+                agn_lifetime_myr=10.0,
+                disk_resolution=64,
+                embedded_bh_num=1,
+                pair_up_eta=0.0,
+                seed=12345,
+            )
 
     def test_stores_migration_and_trap_arrival_times(self) -> None:
         ebh = self.population.embedded_bh
@@ -191,6 +239,9 @@ class TestInitialTrapCondition(unittest.TestCase):
         self.assertTrue(np.all((bbh.chi2 >= 0.0) & (bbh.chi2 <= 1.0)))
         self.assertTrue(np.all((bbh.th1 >= 0.0) & (bbh.th1 <= np.pi)))
         self.assertTrue(np.all((bbh.th2 >= 0.0) & (bbh.th2 <= np.pi)))
+
+
+# Focused pairing-contract tests
 
 
 class TestPairingTimeline(unittest.TestCase):
@@ -386,6 +437,20 @@ class TestPairingTimeline(unittest.TestCase):
         self.assertTrue(np.all(bbh.m1_msun >= bbh.m2_msun))
         self.assertTrue(np.all(np.isin(bbh.t_ini_s, first_times_s)))
 
+    def test_reached_trap_indices_exclude_unreached_bhs(self) -> None:
+        ebh, _ = self._build_pairing_timeline(seed=7)
+        indices = _reached_trap_index_data(ebh)
+
+        np.testing.assert_array_equal(indices.global_indices, [1, 3, 2, 0])
+        self.assertEqual(indices.local_index_by_global[4], -1)
+        for global_index in indices.global_indices:
+            partner = ebh.trap_flag[global_index]
+            if partner >= 0:
+                self.assertGreaterEqual(indices.local_index_by_global[partner], 0)
+
+
+# Diagnostic data derivation and reporting
+
 
 def _finite(values: np.ndarray) -> np.ndarray:
     values = np.asarray(values, dtype=float)
@@ -405,6 +470,73 @@ def _print_summary(label: str, values: np.ndarray, unit: str = "") -> None:
     )
 
 
+def _formed_pair_timeline_data(
+    disk: DiskProfile,
+    ebh: Embedded_BH,
+) -> PairTimelineData:
+    """Recover the encounter and gas-delay phases for every formed BBH."""
+    paired = ebh.trap_flag >= 0
+    first_idx = np.flatnonzero(paired & (ebh.trap_flag > np.arange(ebh.num)))
+    second_idx = ebh.trap_flag[first_idx]
+    if first_idx.size == 0:
+        empty = np.empty(0, dtype=float)
+        return PairTimelineData(
+            first_idx=first_idx,
+            second_idx=second_idx,
+            migration_start_s=empty,
+            arrival_s=empty,
+            encounter_s=empty,
+            formation_s=empty,
+            pair_up_delay_s=empty,
+        )
+
+    later_component_idx = np.where(
+        ebh.t_reach_s[first_idx] >= ebh.t_reach_s[second_idx],
+        first_idx,
+        second_idx,
+    )
+    pair_radius_cm = 0.5 * (
+        ebh.r_pair_cm[first_idx] + ebh.r_pair_cm[second_idx]
+    )
+    pair_up_delay_s = np.fromiter(
+        (
+            pair_up_timescale(
+                disk,
+                float(ebh.m_msun[first]),
+                float(ebh.m_msun[second]),
+                trap_radius_cm=float(radius),
+            )
+            for first, second, radius in zip(first_idx, second_idx, pair_radius_cm)
+        ),
+        dtype=float,
+        count=first_idx.size,
+    )
+    formation_s = ebh.t_pair_s[first_idx]
+    return PairTimelineData(
+        first_idx=first_idx,
+        second_idx=second_idx,
+        migration_start_s=ebh.t_form_s[later_component_idx],
+        arrival_s=ebh.t_reach_s[later_component_idx],
+        encounter_s=formation_s - pair_up_delay_s,
+        formation_s=formation_s,
+        pair_up_delay_s=pair_up_delay_s,
+    )
+
+
+def _reached_trap_index_data(ebh: Embedded_BH) -> ReachedTrapIndexData:
+    """Index only reached trap BHs, in stable arrival-time order."""
+    global_indices = np.flatnonzero(ebh.trap_flag != -1)
+    global_indices = global_indices[
+        np.argsort(ebh.t_reach_s[global_indices], kind="stable")
+    ]
+    local_index_by_global = np.full(ebh.num, -1, dtype=int)
+    local_index_by_global[global_indices] = np.arange(global_indices.size)
+    return ReachedTrapIndexData(
+        global_indices=global_indices,
+        local_index_by_global=local_index_by_global,
+    )
+
+
 def _print_population_summary(
     model_config: ModelConfig,
     agn: AGN_properties,
@@ -417,6 +549,19 @@ def _print_population_summary(
     trap_arrival_s = ebh.t_form_s + ebh.t_mig_s
     reached = ebh.trap_flag != -1
     paired = ebh.trap_flag >= 0
+    stable = np.isfinite(ebh.r_trap_target_cm)
+    late = stable & ~reached
+    pair_timeline = _formed_pair_timeline_data(disk, ebh)
+    reached_indices = _reached_trap_index_data(ebh)
+    single_global_indices = reached_indices.global_indices[
+        ebh.trap_flag[reached_indices.global_indices] == -2
+    ]
+    single_residence_s = (
+        agn.lifetime_myr * Myr - ebh.t_reach_s[single_global_indices]
+    )
+
+    def print_count(label: str, count: int) -> None:
+        print(f"  {label:<26} {count:5d} ({count / ebh.num:6.2%})")
 
     print("\nPhysical trap-population initialization")
     print(f"  SMBH mass:                {agn.M_SMBH_msun:.3e} Msun")
@@ -427,8 +572,41 @@ def _print_population_summary(
     print(f"  reached migration trap:    {np.count_nonzero(reached)}")
     print(f"  BBHs / single BHs:         {bbh.num} / {sbh.num}")
 
+    print("\nPopulation outcomes")
+    print_count("stable migration target", int(np.count_nonzero(stable)))
+    print_count("no stable target", int(np.count_nonzero(~stable)))
+    print_count("stable but late", int(np.count_nonzero(late)))
+    print_count("reached trap", int(np.count_nonzero(reached)))
+    print_count("paired BH members", int(np.count_nonzero(paired)))
+    print_count("trap singles", int(np.count_nonzero(ebh.trap_flag == -2)))
+    print(f"  formed BBHs:               {bbh.num:5d}")
+    print("\nReached-trap population mapping (arrival-order indices)")
+    for first, second, formation_s in zip(
+        pair_timeline.first_idx,
+        pair_timeline.second_idx,
+        pair_timeline.formation_s,
+    ):
+        print(
+            "  trap indices "
+            f"{reached_indices.local_index_by_global[first]:4d} <-> "
+            f"{reached_indices.local_index_by_global[second]:4d}  "
+            f"(embedded {first:4d} <-> {second:4d})  "
+            f"forms at {formation_s / Myr:.6f} Myr"
+        )
+    for global_index in single_global_indices:
+        local_index = reached_indices.local_index_by_global[global_index]
+        residence_s = agn.lifetime_myr * Myr - ebh.t_reach_s[global_index]
+        print(
+            f"  trap index {local_index:4d}  (embedded {global_index:4d})  "
+            f"single after {ebh.t_reach_s[global_index] / Myr:.6f} Myr; "
+            f"residence to AGN end {residence_s / Myr:.6f} Myr"
+        )
+    if reached_indices.global_indices.size == 0:
+        print("  no BHs reached the trap")
+
     print("\nMass summaries")
     _print_summary("embedded BH mass", ebh.m_msun, "Msun")
+    _print_summary("initial disk radius", ebh.R_cm / disk.r_trap_cm, "R_trap")
     _print_summary("BBH primary mass", bbh.m1_msun, "Msun")
     _print_summary("BBH secondary mass", bbh.m2_msun, "Msun")
     _print_summary("single BH mass", sbh.m_msun, "Msun")
@@ -447,10 +625,31 @@ def _print_population_summary(
     _print_summary("formation time", ebh.t_form_s / Myr, "Myr")
     _print_summary("migration time", ebh.t_mig_s / Myr, "Myr")
     _print_summary("reached trap arrival", trap_arrival_s[reached] / Myr, "Myr")
+    _print_summary("single trap residence", single_residence_s / Myr, "Myr")
     _print_summary("pair completion", ebh.t_pair_s[paired] / Myr, "Myr")
     _print_summary(
-        "pairing delay",
-        (ebh.t_pair_s[paired] - trap_arrival_s[paired]) / Myr,
+        "later-member arrival",
+        pair_timeline.arrival_s / Myr,
+        "Myr",
+    )
+    _print_summary(
+        "encounter time",
+        pair_timeline.encounter_s / Myr,
+        "Myr",
+    )
+    _print_summary(
+        "post-arrival encounter wait",
+        (pair_timeline.encounter_s - pair_timeline.arrival_s) / Myr,
+        "Myr",
+    )
+    _print_summary(
+        "gas pair-up delay",
+        pair_timeline.pair_up_delay_s / Myr,
+        "Myr",
+    )
+    _print_summary(
+        "arrival-to-BBH duration",
+        (pair_timeline.formation_s - pair_timeline.arrival_s) / Myr,
         "Myr",
     )
 
@@ -462,16 +661,26 @@ def _legend_if_labeled(ax) -> None:
         ax.legend()
 
 
-def _plot_population_diagnostics(
+# Diagnostic figure rendering
+
+
+def _figure_directory(output_dir: Path, category: str) -> Path:
+    """Return one responsibility-based directory within a diagnostic run."""
+    return ensure_dir(output_dir / category)
+
+
+def _plot_overview_and_bbh_diagnostics(
     population,
     output_dir: Path,
 ) -> list[Path]:
+    """Write one direct event/property view per figure."""
     ebh = population.embedded_bh
     bbh = population.binaries
     reached = ebh.trap_flag != -1
     output_dir = ensure_dir(output_dir)
     arrival_times_s = np.sort(ebh.t_reach_s[reached])
-    pairing_times_s = np.sort(bbh.t_ini_s)
+    pairing_order = np.argsort(bbh.t_ini_s, kind="stable")
+    pairing_times_s = bbh.t_ini_s[pairing_order]
     event_times_s = np.concatenate((arrival_times_s, pairing_times_s))
     event_kind = np.concatenate(
         (
@@ -484,41 +693,402 @@ def _plot_population_diagnostics(
     single_count = np.cumsum(np.where(event_kind[order] == 0, 1, -2))
     binary_count = np.cumsum(np.where(event_kind[order] == 1, 1, 0))
 
-    fig, axes = plt.subplots(5, 1, figsize=(11, 15), sharex=True)
-    axes[0].step(event_times_myr, single_count, where="post", label="Trap singles")
-    axes[0].step(event_times_myr, binary_count, where="post", label="Trap BBHs")
-    axes[0].set_ylabel("Objects")
-    axes[0].set_title("Initial trap-population timeline")
-    _legend_if_labeled(axes[0])
-
     pairing_times_myr = pairing_times_s / Myr
+    paths: list[Path] = []
+
+    fig, axis = plt.subplots(figsize=(10, 5))
+    axis.step(event_times_myr, single_count, where="post", label="Trap singles")
+    axis.step(event_times_myr, binary_count, where="post", label="Trap BBHs")
+    axis.set_title("Initial trap-population count timeline")
+    axis.set_xlabel("Event time (Myr)")
+    axis.set_ylabel("Objects")
+    _legend_if_labeled(axis)
+    fig.tight_layout()
+    paths.append(
+        save_figure(
+            fig,
+            _figure_directory(output_dir, "overview"),
+            "population_counts_vs_time",
+        )
+    )
+
+    fig, axes = plt.subplots(4, 1, figsize=(10, 13), sharex=True)
     if bbh.num:
-        axes[1].scatter(pairing_times_myr, bbh.sma_cm / AU, label="BBH")
-        axes[1].set_yscale("log")
-        axes[2].scatter(pairing_times_myr, bbh.ecc, label="BBH")
-        axes[3].scatter(pairing_times_myr, bbh.chi1, label=r"$\chi_1$")
-        axes[3].scatter(pairing_times_myr, bbh.chi2, label=r"$\chi_2$")
-        axes[4].scatter(pairing_times_myr, bbh.th1, label=r"$\theta_1$")
-        axes[4].scatter(pairing_times_myr, bbh.th2, label=r"$\theta_2$")
-        for ax in axes[1:]:
-            _legend_if_labeled(ax)
+        axes[0].scatter(pairing_times_myr, bbh.sma_cm[pairing_order] / AU)
+        axes[0].set_yscale("log")
+        axes[1].scatter(pairing_times_myr, bbh.ecc[pairing_order])
+        axes[2].scatter(
+            pairing_times_myr,
+            bbh.chi1[pairing_order],
+            label=r"$\chi_1$",
+        )
+        axes[2].scatter(
+            pairing_times_myr,
+            bbh.chi2[pairing_order],
+            label=r"$\chi_2$",
+        )
+        axes[3].scatter(
+            pairing_times_myr,
+            bbh.th1[pairing_order],
+            label=r"$\theta_1$",
+        )
+        axes[3].scatter(
+            pairing_times_myr,
+            bbh.th2[pairing_order],
+            label=r"$\theta_2$",
+        )
+        _legend_if_labeled(axes[2])
+        _legend_if_labeled(axes[3])
     else:
-        for ax in axes[1:]:
-            ax.text(
+        for axis in axes:
+            axis.text(
                 0.5,
                 0.5,
                 "No BBHs formed during the selected AGN lifetime",
                 ha="center",
                 va="center",
-                transform=ax.transAxes,
+                transform=axis.transAxes,
             )
+    axes[0].set_ylabel("Semimajor axis (AU)")
+    axes[1].set_ylabel("Eccentricity")
+    axes[2].set_ylabel("Spin magnitude")
+    axes[3].set_ylabel("Spin tilt (rad)")
+    axes[3].set_xlabel("BBH formation time (Myr)")
+    fig.suptitle("BBH formation parameters", y=0.995)
+    fig.tight_layout()
+    paths.append(
+        save_figure(
+            fig,
+            _figure_directory(output_dir, "bbh_formation"),
+            "formation_parameters_vs_time",
+        )
+    )
+    return paths
 
-    axes[1].set_ylabel("BBH semimajor axis (AU)")
-    axes[2].set_ylabel("BBH eccentricity")
-    axes[3].set_ylabel("Spin magnitude")
-    axes[4].set_ylabel("Spin tilt (rad)")
-    axes[4].set_xlabel("Event time (Myr)")
-    return [save_figure(fig, output_dir, "trap_population_timeline")]
+
+def _plot_trap_state_diagnostics(
+    agn: AGN_properties,
+    disk: DiskProfile,
+    population: InitializedTrapPopulation,
+    output_dir: Path,
+) -> list[Path]:
+    """Write one direct initialization-state view per figure."""
+    ebh = population.embedded_bh
+    sbh = population.singles
+    pair_timeline = _formed_pair_timeline_data(disk, ebh)
+    reached_indices = _reached_trap_index_data(ebh)
+    single_global_indices = reached_indices.global_indices[
+        ebh.trap_flag[reached_indices.global_indices] == -2
+    ]
+    paths: list[Path] = []
+
+    fig, embedded_axis = plt.subplots(figsize=(10, 6))
+    reservoir = embedded_axis.scatter(
+        ebh.R_cm / disk.r_trap_cm,
+        ebh.m_msun,
+        c=ebh.t_form_s / Myr,
+        cmap="viridis",
+        alpha=0.7,
+        s=20,
+    )
+    embedded_axis.axvline(1.0, color="0.2", linewidth=0.8, linestyle="--")
+    embedded_axis.set_title("Embedded-BH reservoir")
+    embedded_axis.set_xlabel("Initial radius / reference trap radius")
+    embedded_axis.set_ylabel("BH mass (Msun)")
+    colorbar = fig.colorbar(reservoir, ax=embedded_axis)
+    colorbar.set_label("Formation time (Myr)")
+    fig.tight_layout()
+    paths.append(
+        save_figure(
+            fig,
+            _figure_directory(output_dir, "embedded_bh"),
+            "initial_reservoir",
+        )
+    )
+
+    timeline_height = max(5.0, 0.16 * pair_timeline.first_idx.size + 2.5)
+    fig, timeline_axis = plt.subplots(figsize=(12, timeline_height))
+    if pair_timeline.first_idx.size:
+        order = np.argsort(pair_timeline.formation_s)
+        rows = np.arange(order.size)
+        migration_start_myr = pair_timeline.migration_start_s[order] / Myr
+        arrival_myr = pair_timeline.arrival_s[order] / Myr
+        encounter_myr = pair_timeline.encounter_s[order] / Myr
+        formation_myr = pair_timeline.formation_s[order] / Myr
+        timeline_axis.hlines(
+            rows,
+            migration_start_myr,
+            arrival_myr,
+            color="tab:orange",
+            linewidth=2.0,
+            label="Migration",
+        )
+        timeline_axis.hlines(
+            rows,
+            arrival_myr,
+            encounter_myr,
+            color="tab:purple",
+            linewidth=2.0,
+            label="Encounter wait",
+        )
+        timeline_axis.hlines(
+            rows,
+            encounter_myr,
+            formation_myr,
+            color="tab:blue",
+            linewidth=2.0,
+            label="Gas pair-up",
+        )
+        timeline_axis.scatter(
+            arrival_myr,
+            rows,
+            color="tab:orange",
+            s=12,
+            label="Reached trap",
+        )
+        timeline_axis.scatter(
+            encounter_myr,
+            rows,
+            color="tab:purple",
+            s=12,
+            label="Encounter",
+        )
+        timeline_axis.scatter(
+            formation_myr,
+            rows,
+            color="tab:blue",
+            s=12,
+            label="BBH formation",
+        )
+        timeline_axis.set_ylabel("BBH ordered by formation time")
+    else:
+        timeline_axis.text(
+            0.5,
+            0.5,
+            "No BBHs formed during the selected AGN lifetime",
+            ha="center",
+            va="center",
+            transform=timeline_axis.transAxes,
+        )
+        timeline_axis.set_ylabel("BBH index")
+    timeline_axis.axvline(
+        agn.lifetime_myr,
+        color="0.2",
+        linewidth=0.8,
+        linestyle=":",
+        label="AGN lifetime",
+    )
+    timeline_axis.set_title("Migration, encounter, and BBH-formation phases")
+    timeline_axis.set_xlabel("Time (Myr)")
+    _legend_if_labeled(timeline_axis)
+    fig.tight_layout()
+    paths.append(
+        save_figure(
+            fig,
+            _figure_directory(output_dir, "pairing"),
+            "formation_phase_timeline",
+        )
+    )
+
+    residence_height = max(5.0, 0.25 * single_global_indices.size + 2.5)
+    fig, single_axis = plt.subplots(figsize=(12, residence_height))
+    if single_global_indices.size:
+        rows = np.arange(single_global_indices.size)
+        arrival_myr = ebh.t_reach_s[single_global_indices] / Myr
+        end_myr = np.full(single_global_indices.size, agn.lifetime_myr)
+        residence_myr = end_myr - arrival_myr
+        single_axis.hlines(
+            rows,
+            arrival_myr,
+            end_myr,
+            color="tab:orange",
+            linewidth=2.0,
+            label="Available single-BH residence",
+        )
+        arrival_points = single_axis.scatter(
+            arrival_myr,
+            rows,
+            c=ebh.m_msun[single_global_indices],
+            cmap="plasma",
+            s=28,
+            label="Trap arrival",
+        )
+        single_axis.scatter(
+            end_myr,
+            rows,
+            color="0.2",
+            marker="|",
+            s=90,
+            label="AGN end",
+        )
+        if single_global_indices.size <= 20:
+            for row, arrival_time_myr, end_time_myr, duration_myr in zip(
+                rows,
+                arrival_myr,
+                end_myr,
+                residence_myr,
+            ):
+                single_axis.text(
+                    float(0.5 * (arrival_time_myr + end_time_myr)),
+                    float(row),
+                    f"{float(duration_myr):.2f} Myr",
+                    ha="center",
+                    va="bottom",
+                    fontsize=8,
+                )
+        single_axis.set_yticks(rows)
+        single_axis.set_yticklabels(
+            reached_indices.local_index_by_global[single_global_indices]
+        )
+        colorbar = fig.colorbar(arrival_points, ax=single_axis)
+        colorbar.set_label("BH mass (Msun)")
+        _legend_if_labeled(single_axis)
+    else:
+        single_axis.set_ylabel("Reached-trap sBH index")
+    if sbh.num == 0:
+        single_axis.text(
+            0.5,
+            0.5,
+            "No trap singles",
+            ha="center",
+            va="center",
+            transform=single_axis.transAxes,
+        )
+    single_axis.axvline(
+        agn.lifetime_myr,
+        color="0.2",
+        linewidth=0.8,
+        linestyle=":",
+    )
+    single_axis.set_title("Trap single-BH residence available for later BSI")
+    single_axis.set_xlabel("Time (Myr)")
+    single_axis.set_ylabel("Arrival-ordered reached-trap sBH index")
+    fig.tight_layout()
+    paths.append(
+        save_figure(
+            fig,
+            _figure_directory(output_dir, "trap_singles"),
+            "residence_timeline",
+        )
+    )
+
+    bbh = population.binaries
+    fig, binary_axis = plt.subplots(figsize=(10, 6))
+    binary_axis.scatter(
+        bbh.m2_msun,
+        bbh.m1_msun,
+        c=bbh.t_ini_s / Myr,
+        cmap="plasma",
+        alpha=0.7,
+        s=28,
+    )
+    binary_axis.set_title("First-generation BBH population")
+    binary_axis.set_xlabel("Secondary mass (Msun)")
+    binary_axis.set_ylabel("Primary mass (Msun)")
+    if bbh.num:
+        mass_limits = [
+            min(np.min(bbh.m2_msun), np.min(bbh.m1_msun)),
+            max(np.max(bbh.m1_msun), np.max(bbh.m2_msun)),
+        ]
+        binary_axis.plot(
+            mass_limits,
+            mass_limits,
+            color="0.2",
+            linewidth=0.8,
+            linestyle="--",
+        )
+        colorbar = fig.colorbar(binary_axis.collections[0], ax=binary_axis)
+        colorbar.set_label("BBH formation time (Myr)")
+    else:
+        binary_axis.text(
+            0.5,
+            0.5,
+            "No BBHs formed",
+            ha="center",
+            va="center",
+            transform=binary_axis.transAxes,
+        )
+    fig.tight_layout()
+    paths.append(
+        save_figure(
+            fig,
+            _figure_directory(output_dir, "bbh_formation"),
+            "component_mass_distribution",
+        )
+    )
+
+    fig, pair_index_axis = plt.subplots(figsize=(8, 8))
+    single_local_indices = reached_indices.local_index_by_global[single_global_indices]
+    if pair_timeline.first_idx.size:
+        first_idx = reached_indices.local_index_by_global[pair_timeline.first_idx]
+        second_idx = reached_indices.local_index_by_global[pair_timeline.second_idx]
+        formation_myr = pair_timeline.formation_s / Myr
+        lower_idx = np.minimum(first_idx, second_idx)
+        upper_idx = np.maximum(first_idx, second_idx)
+        pair_index_map = pair_index_axis.scatter(
+            lower_idx,
+            upper_idx,
+            c=formation_myr,
+            cmap="cividis",
+            s=24,
+        )
+        colorbar = fig.colorbar(pair_index_map, ax=pair_index_axis)
+        colorbar.set_label("BBH formation time (Myr)")
+    if single_local_indices.size:
+        pair_index_axis.scatter(
+            single_local_indices,
+            single_local_indices,
+            color="tab:orange",
+            marker="x",
+            s=38,
+            label="Trap single (no partner)",
+        )
+        _legend_if_labeled(pair_index_axis)
+    else:
+        if pair_timeline.first_idx.size == 0:
+            pair_index_axis.text(
+                0.5,
+                0.5,
+                "No BHs reached the trap during the selected AGN lifetime",
+                ha="center",
+                va="center",
+                transform=pair_index_axis.transAxes,
+            )
+    reached_count = reached_indices.global_indices.size
+    if reached_count:
+        pair_index_axis.plot(
+            [0, reached_count - 1],
+            [0, reached_count - 1],
+            color="0.2",
+            linewidth=0.8,
+            linestyle="--",
+        )
+        pair_index_axis.set_xlim(-0.5, reached_count - 0.5)
+        pair_index_axis.set_ylim(-0.5, reached_count - 0.5)
+    pair_index_axis.set_title("Reached-trap sBH pair-up map")
+    pair_index_axis.set_xlabel("Lower arrival-ordered sBH index i")
+    pair_index_axis.set_ylabel("Higher partner index j; diagonal x = single")
+    pair_index_axis.text(
+        0.02,
+        0.98,
+        "Indices include only BHs that reached the trap.\n"
+        "Each upper-triangle point (i, j) means i pairs with j, i < j.",
+        ha="left",
+        va="top",
+        transform=pair_index_axis.transAxes,
+    )
+    fig.tight_layout()
+    paths.append(
+        save_figure(
+            fig,
+            _figure_directory(output_dir, "pairing"),
+            "reached_trap_sbh_pair_map",
+        )
+    )
+    return paths
+
+
+# Diagnostic CLI
 
 
 def run_diagnostics(
@@ -540,7 +1110,10 @@ def run_diagnostics(
         seed=seed,
     )
     _print_population_summary(config, agn, disk, population)
-    paths = _plot_population_diagnostics(population, output_dir)
+    paths = _plot_overview_and_bbh_diagnostics(population, output_dir)
+    paths.extend(
+        _plot_trap_state_diagnostics(agn, disk, population, output_dir)
+    )
     print("\nSaved figures:")
     for path in paths:
         print(f"  {path}")

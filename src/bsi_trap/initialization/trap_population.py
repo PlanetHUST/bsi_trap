@@ -82,24 +82,29 @@ def construct_initial_trap_condition(
     if not np.isfinite(end_time_s) or end_time_s <= 0.0:
         raise ValueError("AGN lifetime must define a finite, positive end time")
 
-    migration = resolve_mass_dependent_trap_migration(
+    # 1. get migration timescales, traget trap radius
+    migration_results = resolve_mass_dependent_trap_migration(
         agn=agn,
         disk=disk,
         ebh=ebh,
     )
-    migration_times_s = migration.migration_times_s
+    migration_times_s = migration_results.migration_times_s
+
     if migration_times_s.shape != (ebh.num,):
         raise ValueError("Migration solver returned an invalid population shape")
     if np.any(np.isnan(migration_times_s)) or np.any(migration_times_s < 0.0):
-        raise ValueError("Migration times must be nonnegative finite values or infinity")
+        raise ValueError(
+            "Migration times must be nonnegative finite values or infinity"
+        )
 
     ebh.t_mig_s = migration_times_s
     ebh.t_reach_s = ebh.t_form_s + migration_times_s
-    ebh.r_trap_target_cm = migration.target_radii_cm
+    ebh.r_trap_target_cm = migration_results.target_radii_cm
 
-    reached_mask = migration.stable_mask & (ebh.t_reach_s < end_time_s)
+    reached_mask = migration_results.stable_mask & (ebh.t_reach_s < end_time_s)
     trap_context = build_trap_context(disk, model_config)
     ebh.trap_width_cm = trap_context.width_cm
+
     construct_pairing_up_timeline(
         embedded_bh=ebh,
         reached_mask=reached_mask,
@@ -114,9 +119,12 @@ def construct_initial_trap_condition(
     _validate_trap_state(ebh, end_time_s)
     bbh = init_bbh(ebh)
     sbh = init_sbh(ebh)
+
     reached_count = int(np.count_nonzero(reached_mask))
+
     if 2 * bbh.num + sbh.num != reached_count:
         raise ValueError("Initial trap population does not conserve reached BHs")
+
     return bbh, sbh
 
 

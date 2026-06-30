@@ -37,12 +37,10 @@ def pair_up_timescale(
     sound_speed_cgs = disk.get_cs(trap_radius_cm)
     scale_height_cm = disk.get_scale_height_cm(trap_radius_cm)
     surface_density_cgs = disk.get_sigma(trap_radius_cm)
-    if (
-        sound_speed_cgs <= 0.0
-        or scale_height_cm <= 0.0
-        or surface_density_cgs <= 0.0
-    ):
-        raise ValueError("Trap disk sound speed, scale height, and density must be positive")
+    if sound_speed_cgs <= 0.0 or scale_height_cm <= 0.0 or surface_density_cgs <= 0.0:
+        raise ValueError(
+            "Trap disk sound speed, scale height, and density must be positive"
+        )
 
     total_mass_g = (m1_msun + m2_msun) * msun
     midplane_density_cgs = surface_density_cgs / (2.0 * scale_height_cm)
@@ -59,17 +57,14 @@ def shear_relative_velocity(
     second_radius_cm: float,
 ) -> float:
     """Return the circular-orbit shear speed between two local trap radii."""
-    if (
-        smbh_mass_msun <= 0.0
-        or first_radius_cm <= 0.0
-        or second_radius_cm <= 0.0
-    ):
+    if smbh_mass_msun <= 0.0 or first_radius_cm <= 0.0 or second_radius_cm <= 0.0:
         raise ValueError("SMBH mass and pairing radii must be positive")
 
     smbh_mass_g = smbh_mass_msun * msun
     first_omega_s_inv = np.sqrt(G * smbh_mass_g / first_radius_cm**3)
     second_omega_s_inv = np.sqrt(G * smbh_mass_g / second_radius_cm**3)
     mean_radius_cm = 0.5 * (first_radius_cm + second_radius_cm)
+
     return float(mean_radius_cm * abs(first_omega_s_inv - second_omega_s_inv))
 
 
@@ -79,16 +74,14 @@ def conjunction_rate(
     second_radius_cm: float,
 ) -> float:
     """Return the phase-averaged conjunction rate for two circular orbits."""
-    if (
-        smbh_mass_msun <= 0.0
-        or first_radius_cm <= 0.0
-        or second_radius_cm <= 0.0
-    ):
+
+    if smbh_mass_msun <= 0.0 or first_radius_cm <= 0.0 or second_radius_cm <= 0.0:
         raise ValueError("SMBH mass and pairing radii must be positive")
 
     smbh_mass_g = smbh_mass_msun * msun
     first_omega_s_inv = np.sqrt(G * smbh_mass_g / first_radius_cm**3)
     second_omega_s_inv = np.sqrt(G * smbh_mass_g / second_radius_cm**3)
+
     return float(abs(first_omega_s_inv - second_omega_s_inv) / (2.0 * np.pi))
 
 
@@ -98,11 +91,8 @@ def is_strong_gravity_encounter(
     relative_velocity_cms: float,
     impact_parameter_cm: float,
 ) -> bool:
-    """Check whether shear kinetic energy is below the potential at ``b``.
-
-    This is a strong-encounter eligibility condition, not a gas-capture
-    calculation. A subsequent gas-dissipation model is required to prove that
-    the initially unbound two-body orbit becomes a BBH.
+    """
+    Check whether shear kinetic energy is below the potential at ``b``.
     """
     if m1_msun <= 0.0 or m2_msun <= 0.0:
         raise ValueError("BBH component masses must be positive")
@@ -112,9 +102,8 @@ def is_strong_gravity_encounter(
         )
 
     total_mass_g = (m1_msun + m2_msun) * msun
-    return bool(
-        relative_velocity_cms**2 < 2.0 * G * total_mass_g / impact_parameter_cm
-    )
+
+    return bool(relative_velocity_cms**2 < 2.0 * G * total_mass_g / impact_parameter_cm)
 
 
 def effective_capture_impact_parameter(

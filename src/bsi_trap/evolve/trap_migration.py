@@ -15,7 +15,6 @@ from bsi_trap.disk_profile.migration_torque import (
 )
 from bsi_trap.functions.migration_timescale import migration_timescale_torque
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -46,13 +45,7 @@ def resolve_mass_dependent_trap_migration(
     disk: DiskProfile,
     ebh: Embedded_BH,
 ) -> TrapMigrationResult:
-    """Compute migration targets and widths from the initialized BH masses.
 
-    Each distinct BH mass is evaluated against its own torque profile. Objects
-    with no stable torque crossing retain infinite migration time and are
-    excluded from trap pairing; the numerical fallback from ``find_traps`` is
-    never used as their physical target.
-    """
     if agn.pagn_disk is None:
         logger.warning(
             "No pAGN disk is attached; using the shared reference trap for all "
@@ -66,7 +59,9 @@ def resolve_mass_dependent_trap_migration(
         )
         target_radii_cm = np.full(ebh.num, disk.r_trap_cm, dtype=float)
         stable_mask = np.ones(ebh.num, dtype=bool)
+
     else:
+        # intilize return values
         migration_times_s = np.full(ebh.num, np.inf, dtype=float)
         target_radii_cm = np.full(ebh.num, np.nan, dtype=float)
         stable_mask = np.zeros(ebh.num, dtype=bool)
@@ -75,6 +70,7 @@ def resolve_mass_dependent_trap_migration(
             ebh.m_msun,
             return_inverse=True,
         )
+
         mass_order = np.argsort(inverse_mass_index)
         group_sizes = np.bincount(inverse_mass_index)
         group_starts = np.concatenate(([0], np.cumsum(group_sizes[:-1])))
@@ -85,17 +81,24 @@ def resolve_mass_dependent_trap_migration(
             group_sizes,
         ):
             mass_indices = mass_order[group_start : group_start + group_size]
+
+            # find migration trap radius for each mass
             _, _, torque_profile = find_traps(
                 agn.pagn_disk,
                 migrator_mass_msun=float(mass_msun),
             )
+
+            # only consider stable trap radius
             stable_radii_cm, _ = classify_torque_crossings(torque_profile)
+
             if stable_radii_cm.size == 0:
                 continue
 
             target_radius_cm = float(np.max(stable_radii_cm))
             target_radii_cm[mass_indices] = target_radius_cm
             stable_mask[mass_indices] = True
+
+            # compute migration timescale
             migration_times_s[mass_indices] = migration_timescale_torque(
                 m_msun=ebh.m_msun[mass_indices],
                 R_ini_cm=ebh.R_cm[mass_indices],

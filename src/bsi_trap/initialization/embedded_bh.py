@@ -11,7 +11,7 @@ from bsi_trap.classes.models import (
     Embedded_BH,
 )
 from bsi_trap.constant.constant import Myr
-from bsi_trap.functions.nsc_population import number_enclosed_NSC
+from bsi_trap.functions.nsc_population import number_enclosed_NSC, BH_fraction_NSC
 from bsi_trap.functions.random_sample import sample_embedded_radius
 
 DEFAULT_STELLAR_CATALOG = (
@@ -55,8 +55,10 @@ def embedded_BH_initialize(
     mave_msun = agn.mave_msun
     M_SMBH_msun = agn.M_SMBH_msun
 
-    # 1. calculate the number of embedded BHs
-    number_ebh_get = number_enclosed_NSC(M_SMBH_msun, mave_msun, r_out_cm)
+    # 1. calculate the number of embedded BHs, naively times one BH fraction factor: 1e-2
+    number_ebh_get = (
+        number_enclosed_NSC(M_SMBH_msun, mave_msun, r_out_cm) * BH_fraction_NSC()
+    )
 
     # add safe check boundary
     number_ebh = max(1, int(round(number_ebh_get)))
@@ -66,9 +68,11 @@ def embedded_BH_initialize(
             f"Embedded-BH population size must be nonnegative, got {number_ebh}"
         )
 
+    # prepare for random sampling
     _, catalog_mass_msun, catalog_tform_myr = load_filtered_stellar_population(
         catalog_path
     )
+
     sample_idx = rng_nsc.integers(0, catalog_mass_msun.size, size=number_ebh)
     m1_msun = catalog_mass_msun[sample_idx]
     tform_s = catalog_tform_myr[sample_idx] * Myr

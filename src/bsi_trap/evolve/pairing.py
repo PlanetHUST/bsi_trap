@@ -36,13 +36,17 @@ def _eligible_pair_candidates(
     before the specified end time if its interaction occurred immediately.
     """
     waiting: IndexArray = np.asarray(waiting_idx, dtype=np.intp)
-    left, right = np.triu_indices(waiting.size, k=1)
-    first_idx = waiting[left]
-    second_idx = waiting[right]
+
+    # generate pair index without duplicates
+    first_part_index, second_part_index = np.triu_indices(waiting.size, k=1)
+
+    first_idx = waiting[first_part_index]
+    second_idx = waiting[second_part_index]
 
     first_radius_cm: FloatArray = embedded_bh.r_pair_cm[first_idx]
     second_radius_cm: FloatArray = embedded_bh.r_pair_cm[second_idx]
     mean_radius_cm: FloatArray = 0.5 * (first_radius_cm + second_radius_cm)
+
     radial_separation_cm: FloatArray = np.abs(first_radius_cm - second_radius_cm)
     impact_parameters_cm: FloatArray = np.fromiter(
         (
@@ -60,6 +64,7 @@ def _eligible_pair_candidates(
         dtype=np.float64,
         count=first_idx.size,
     )
+
     relative_velocities_cms: FloatArray = np.fromiter(
         (
             shear_relative_velocity(smbh_mass_msun, float(first), float(second))
@@ -68,6 +73,7 @@ def _eligible_pair_candidates(
         dtype=np.float64,
         count=first_idx.size,
     )
+
     conjunction_rates_s_inv: FloatArray = np.fromiter(
         (
             conjunction_rate(smbh_mass_msun, float(first), float(second))
@@ -76,6 +82,7 @@ def _eligible_pair_candidates(
         dtype=np.float64,
         count=first_idx.size,
     )
+
     pair_delays_s: FloatArray = np.fromiter(
         (
             pair_up_timescale(
@@ -90,8 +97,9 @@ def _eligible_pair_candidates(
         count=first_idx.size,
     )
 
-    local_pairs = radial_separation_cm < impact_parameters_cm
-    strong_pairs = np.fromiter(
+    local_pairs_mask = radial_separation_cm < impact_parameters_cm
+
+    strong_pairs_mask = np.fromiter(
         (
             is_strong_gravity_encounter(
                 float(embedded_bh.m_msun[first]),
@@ -109,21 +117,23 @@ def _eligible_pair_candidates(
         dtype=bool,
         count=first_idx.size,
     )
-    can_complete = current_time_s + pair_delays_s <= end_time_s
-    eligible = (
-        local_pairs
-        & strong_pairs
-        & can_complete
+    can_complete_mask = current_time_s + pair_delays_s <= end_time_s
+
+    eligible_mask = (
+        local_pairs_mask
+        & strong_pairs_mask
+        & can_complete_mask
         & (conjunction_rates_s_inv > 0.0)
     )
-    if not np.any(eligible):
+
+    if not np.any(eligible_mask):
         return None
 
     return (
-        first_idx[eligible],
-        second_idx[eligible],
-        conjunction_rates_s_inv[eligible],
-        pair_delays_s[eligible],
+        first_idx[eligible_mask],
+        second_idx[eligible_mask],
+        conjunction_rates_s_inv[eligible_mask],
+        pair_delays_s[eligible_mask],
     )
 
 
@@ -161,12 +171,17 @@ def _sample_next_encounter(
 
     first_idx, second_idx, conjunction_rates_s_inv, pair_delays_s = candidates
     encounter_rate_s_inv = conjunction_rates_s_inv.sum()
+
+    # safe check
     if not np.isfinite(encounter_rate_s_inv) or encounter_rate_s_inv <= 0.0:
         raise ValueError("Pair encounter rate must be finite and positive")
-    encounter_time_s = current_time_s + rng_pair_up.exponential(
+
+    # Possion distribution encounter assumption
+    encounter_abs_time_s = current_time_s + rng_pair_up.exponential(
         1.0 / encounter_rate_s_inv
     )
-    if encounter_time_s >= time_limit_s:
+
+    if encounter_abs_time_s >= time_limit_s:
         return None
 
     pair_position = int(
@@ -175,8 +190,9 @@ def _sample_next_encounter(
             p=conjunction_rates_s_inv / conjunction_rates_s_inv.sum(),
         )
     )
+
     return (
-        float(encounter_time_s),
+        float(encounter_abs_time_s),
         int(first_idx[pair_position]),
         int(second_idx[pair_position]),
         float(pair_delays_s[pair_position]),
@@ -195,15 +211,15 @@ def construct_pairing_up_timeline(
 ) -> FloatArray:
     """Construct first-generation BBH formation times up to ``end_time_s``.
 
-    The function mutates only initial-pairing state on ``embedded_bh``:
-
     - ``trap_flag`` is ``-1`` for objects outside the reached population,
-      ``-2`` for trap singles, and stores a symmetric partner index for BBHs.
+      ``-2`` for trap singles till the dutycycle, and stores a symmetric partner index for BBHs.
     - ``t_pair_s`` stores the BBH formation time for both members of each pair.
 
     Returned times have one entry per BBH and are sorted chronologically.
     """
     reached_mask = np.asarray(reached_mask, dtype=bool)
+
+    # safe check
     if reached_mask.shape != (embedded_bh.num,):
         raise ValueError(
             f"reached_mask must have shape ({embedded_bh.num},), "
@@ -215,35 +231,50 @@ def construct_pairing_up_timeline(
         raise ValueError("SMBH mass must be finite and positive")
 
     reached_times_s = embedded_bh.t_reach_s[reached_mask]
+
+    # safe check
     if np.any(~np.isfinite(reached_times_s)) or np.any(reached_times_s < 0.0):
         raise ValueError("Reached BH arrival times must be finite and nonnegative")
     if np.any(embedded_bh.m_msun[reached_mask] <= 0.0):
         raise ValueError("Reached BH masses must be positive")
+
     active_mask = reached_mask & (embedded_bh.t_reach_s < end_time_s)
+
     embedded_bh.r_pair_cm[~active_mask] = np.nan
-    missing_radii = active_mask & ~np.isfinite(embedded_bh.r_pair_cm)
-    if np.any(missing_radii):
+
+    actual_task_mask = active_mask & ~np.isfinite(embedded_bh.r_pair_cm)
+
+    # set random initial radius in the trap
+    if np.any(actual_task_mask):
         radial_scale_cm = (
             model_config.trap_radial_dispersion_scale_heights
             * disk.get_scale_height_cm(disk.r_trap_cm)
         )
+
         if radial_scale_cm <= 0.0:
             raise ValueError("trap_radial_dispersion_scale_heights must be positive")
+
         centers_cm = np.where(
-            np.isfinite(embedded_bh.r_trap_target_cm[missing_radii]),
-            embedded_bh.r_trap_target_cm[missing_radii],
+            np.isfinite(embedded_bh.r_trap_target_cm[actual_task_mask]),
+            embedded_bh.r_trap_target_cm[actual_task_mask],
             disk.r_trap_cm,
         )
-        offsets_cm = rng_pair_up.normal(0.0, radial_scale_cm, missing_radii.sum())
+
+        offsets_cm = rng_pair_up.normal(0.0, radial_scale_cm, actual_task_mask.sum())
         offsets_cm = np.clip(
             offsets_cm,
             -0.5 * trap_context.width_cm,
             0.5 * trap_context.width_cm,
         )
-        embedded_bh.r_pair_cm[missing_radii] = centers_cm + offsets_cm
+        embedded_bh.r_pair_cm[actual_task_mask] = centers_cm + offsets_cm
+
     active_radii_cm = embedded_bh.r_pair_cm[active_mask]
+
     if np.any(~np.isfinite(active_radii_cm)) or np.any(active_radii_cm <= 0.0):
         raise ValueError("Reached BH pairing radii must be finite and positive")
+
+    # -1 means trap not reaching; -2 means trap reached but final singel BH till dutycycle;
+    # now set pair-up timeline, and the pair-up index
     embedded_bh.trap_flag.fill(-1)
     embedded_bh.trap_flag[active_mask] = -2
     embedded_bh.t_pair_s.fill(np.nan)
@@ -264,7 +295,7 @@ def construct_pairing_up_timeline(
         nonlocal current_time_s
 
         while len(waiting_idx) >= 2 and current_time_s < time_limit_s:
-            event = _sample_next_encounter(
+            event_parms = _sample_next_encounter(
                 embedded_bh=embedded_bh,
                 waiting_idx=waiting_idx,
                 disk=disk,
@@ -276,12 +307,14 @@ def construct_pairing_up_timeline(
                 end_time_s=end_time_s,
                 rng_pair_up=rng_pair_up,
             )
-            if event is None:
+            if event_parms is None:
                 return
 
-            encounter_time_s, first_ind, second_ind, pair_delay_s = event
-            bbh_formation_time_s = encounter_time_s + pair_delay_s
-            current_time_s = encounter_time_s
+            encounter_abs_time_s, first_ind, second_ind, pair_delay_s = event_parms
+            bbh_formation_time_s = encounter_abs_time_s + pair_delay_s
+            current_time_s = encounter_abs_time_s
+
+            # check for dutycycle
             if bbh_formation_time_s > end_time_s:
                 continue
 
@@ -289,8 +322,10 @@ def construct_pairing_up_timeline(
             embedded_bh.trap_flag[second_ind] = first_ind
             embedded_bh.t_pair_s[first_ind] = bbh_formation_time_s
             embedded_bh.t_pair_s[second_ind] = bbh_formation_time_s
+
             waiting_idx.remove(first_ind)
             waiting_idx.remove(second_ind)
+
             formation_times_s.append(bbh_formation_time_s)
 
     for index in arrival_idx:
@@ -298,5 +333,7 @@ def construct_pairing_up_timeline(
         process_until(arrival_time_s)
         current_time_s = arrival_time_s
         waiting_idx.append(int(index))
+
     process_until(end_time_s)
+
     return np.sort(np.asarray(formation_times_s, dtype=float))

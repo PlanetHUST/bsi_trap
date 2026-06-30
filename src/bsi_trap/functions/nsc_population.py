@@ -61,6 +61,10 @@ def mass_enclosed_NSC(M_SMBH_msun: float, R_cm: float, gamma: float = 1.3) -> fl
     return m_enclosed_msun
 
 
+def BH_fraction_NSC():
+    return 1e-2
+
+
 def number_enclosed_NSC(
     M_SMBH_msun: float,
     mave_msun: float,

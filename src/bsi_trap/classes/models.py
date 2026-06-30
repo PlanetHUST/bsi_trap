@@ -7,7 +7,6 @@ import numpy.typing as npt
 from dataclasses import dataclass
 from typing import Any
 
-
 FloatArray = npt.NDArray[np.float64]
 IntArray = npt.NDArray[np.int64]
 
@@ -25,7 +24,6 @@ class AGN_properties(object):
         self.disk_profile: DiskProfile | None = None
         self.torque_profile: TorqueProfile | None = None
         self.pagn_disk: Any | None = None
-        self.trap_reference_mass_msun: float | None = None
 
 
 @dataclass(frozen=True)
@@ -126,8 +124,7 @@ class TorqueProfile:
 
 
 class Embedded_BH(object):
-    """Embedded-BH reservoir and its initial trap-population state.
-
+    """
     ``trap_flag`` records the state after initial pairing:
     ``-1`` did not reach the trap, ``-2`` reached but remains single, and a
     non-negative value is the index of the selected binary companion.
@@ -136,9 +133,6 @@ class Embedded_BH(object):
     """
 
     def __init__(self, num: int):
-        if num < 0:
-            raise ValueError("Embedded-BH population size must be nonnegative")
-
         self.num: int = num
         self.m_msun: FloatArray = np.zeros(num, dtype=np.float64)
         self.t_form_s: FloatArray = np.zeros(num, dtype=np.float64)

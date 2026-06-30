@@ -52,6 +52,7 @@ def _build_environment(
 
     # 1. from pAGN get disk profile
     # QUESTION: model_config details for rin, rout et al. setting
+    # for pAGN, rin is several rg, rout is 10**7 rg
     pagn_profile = build_pagn_disk_profile(
         smbh_mass,
         model=model_config.disk_model,
@@ -85,7 +86,6 @@ def _build_environment(
     agn.disk_profile = disk
     agn.torque_profile = torque_profile
     agn.pagn_disk = pagn_profile.disk
-    agn.trap_reference_mass_msun = trap_reference_mass_msun
 
     return agn, disk
 
@@ -104,7 +104,7 @@ def initialize_trap_population(
     # 1. initialize embedded BH properties
     ebh = embedded_BH_initialize(agn, disk, rng_nsc)
 
-    # 2. embedded BH to BBHs in trap
+    # 2. MAIN PART I: embedded BH to BBHs in trap
     bbh_1g, sbh_1g = construct_initial_trap_condition(
         model_config=model_config,
         agn=agn,
