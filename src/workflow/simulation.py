@@ -16,11 +16,12 @@ from bsi_trap.config.model_config import ModelConfig
 from bsi_trap.evolve.trap_migration import (
     find_catalog_median_reference_trap,
 )
+from bsi_trap.evolve.timeline import PairingTimeline
 from bsi_trap.initialization.embedded_bh import (
     embedded_BH_initialize,
     load_filtered_stellar_population,
 )
-from bsi_trap.initialization.trap_population import construct_initial_trap_condition
+from bsi_trap.initialization.trap_population import construct_initial_trap_population
 from bsi_trap.disk_profile.pagn_disk_adapter import build_pagn_disk_profile
 from bsi_trap.initialization.bbh_parameters import BBH_params_initialize
 from bsi_trap.config.rng import resolve_seed, make_rng_streams
@@ -36,6 +37,7 @@ class TrapPopulation:
     embedded_bh: Embedded_BH
     binaries: BBH_properties
     singles: Single_BH_properties
+    pairing_timeline: PairingTimeline
 
 
 def _build_environment(
@@ -105,7 +107,7 @@ def initialize_trap_population(
     ebh = embedded_BH_initialize(agn, disk, rng_nsc)
 
     # 2. MAIN PART I: embedded BH to BBHs in trap
-    bbh_1g, sbh_1g = construct_initial_trap_condition(
+    bbh_1g, sbh_1g, pairing_timeline = construct_initial_trap_population(
         model_config=model_config,
         agn=agn,
         disk=disk,
@@ -127,6 +129,7 @@ def initialize_trap_population(
         embedded_bh=ebh,
         binaries=bbh_1g,
         singles=sbh_1g,
+        pairing_timeline=pairing_timeline,
     )
 
 
@@ -160,6 +163,8 @@ def run_physics_sample(
         rng_spin=rng.spin,
     )
 
-    # 4. data storage
+    # 4. binary evolve to merges
+
+    # 5. data storage
 
     return SampleWorkflowResult(str(output_file))

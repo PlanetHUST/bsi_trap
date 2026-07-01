@@ -10,7 +10,7 @@ from bsi_trap.disk_profile.disk_numeric import (
 )
 
 
-def total_pressure(disk):
+def _total_pressure(disk):
     ct, _ = require_pagn_bits()
     k_boltzmann = constant(ct, "Kb", "kB", "k")
     mass_u = constant(ct, "massU", "mU", "mp")
@@ -19,15 +19,15 @@ def total_pressure(disk):
     return gas_pressure + radiation_pressure
 
 
-def surface_density(disk):
+def _surface_density(disk):
     return 2.0 * disk.rho * disk.h
 
 
-def comp_corot(dsigma_dlogr, dtemp_dlogr, gamma_adiabat):
+def _comp_corot(dsigma_dlogr, dtemp_dlogr, gamma_adiabat):
     return (0.46 + 0.96 * dsigma_dlogr - 1.8 * dtemp_dlogr) / gamma_adiabat
 
 
-def thermal_diffusivity(disk, gamma_adiabat):
+def _thermal_diffusivity(disk, gamma_adiabat):
     ct, _ = require_pagn_bits()
     return (
         16.0
@@ -39,31 +39,31 @@ def thermal_diffusivity(disk, gamma_adiabat):
     )
 
 
-def comp_lind(dsigma_dlogr, dtemp_dlogr, disk, gamma_adiabat):
-    chi = thermal_diffusivity(disk, gamma_adiabat)
+def _comp_lind(dsigma_dlogr, dtemp_dlogr, disk, gamma_adiabat):
+    chi = _thermal_diffusivity(disk, gamma_adiabat)
     chi_c = disk.h**2 * disk.Omega
     x_sq = np.sqrt(safe_divide(chi, 2.0 * chi_c))
     f_gamma = (x_sq + 1.0 / gamma_adiabat) / (x_sq + 1.0)
     return (-2.34 - 0.1 * dsigma_dlogr + 1.5 * dtemp_dlogr) * f_gamma
 
 
-def comp_kappa(q, h_over_r, alpha):
+def _comp_kappa(q, h_over_r, alpha):
     return q**2 / (h_over_r**5 * alpha)
 
 
-def comp_gamma_0(q, radius, scale_height, omega, rho):
+def _comp_gamma_0(q, radius, scale_height, omega, rho):
     # return normalization torque Gamma_0 = (q/h)^2 * Sigma * r^4 * Omega^2
     sigma = 2.0 * rho * scale_height
     h_over_r = scale_height / radius
     return q**2 * radius**4 * omega**2 * sigma / (h_over_r**2)
 
 
-def comp_gamma_th(dpressure_dlogr, disk, migrator_mass, params):
+def _comp_gamma_th(dpressure_dlogr, disk, migrator_mass, params):
     # return the thermal torque coefficient
     ct, electron_scattering_opacity = require_pagn_bits()
     gamma = params.gamma_adiabat  # adibatic index
 
-    chi = thermal_diffusivity(disk, gamma)
+    chi = _thermal_diffusivity(disk, gamma)
 
     x_c = (
         np.abs(dpressure_dlogr) * disk.cs**2 / (3.0 * gamma * disk.R * disk.Omega**2)
@@ -100,7 +100,7 @@ def comp_gamma_th(dpressure_dlogr, disk, migrator_mass, params):
 ###########Main migration torque and trap-finding functions###########
 
 
-def compute_torque_profile(
+def _compute_torque_profile(
     disk,
     *,
     migrator_mass_msun: float = 10.0,
@@ -122,8 +122,8 @@ def compute_torque_profile(
     disk_view = sorted_disk_view(disk)
     migrator_mass = float(migrator_mass_msun) * ct.MSun
 
-    sigma = surface_density(disk_view)
-    pressure = total_pressure(disk_view)
+    sigma = _surface_density(disk_view)
+    pressure = _total_pressure(disk_view)
 
     dsigma_dlogr = np.asarray(
         radial_log_slope(disk_view.R, sigma, smoothing=smoothing), dtype=float
@@ -143,11 +143,11 @@ def compute_torque_profile(
     )  # vertical dependence factor for the torque, assuming a Gaussian vertical density profile
 
     # compute coefficients for torques
-    corot = comp_corot(dsigma_dlogr, dtemp_dlogr, params.gamma_adiabat)
-    lind = comp_lind(dsigma_dlogr, dtemp_dlogr, disk_view, params.gamma_adiabat)
-    kappa_gap = comp_kappa(q, h_over_r, params.alpha)
-    gamma_0 = comp_gamma_0(q, disk_view.R, disk_view.h, disk_view.Omega, disk_view.rho)
-    gamma_th_coeff = comp_gamma_th(dpressure_dlogr, disk_view, migrator_mass, params)
+    corot = _comp_corot(dsigma_dlogr, dtemp_dlogr, params.gamma_adiabat)
+    lind = _comp_lind(dsigma_dlogr, dtemp_dlogr, disk_view, params.gamma_adiabat)
+    kappa_gap = _comp_kappa(q, h_over_r, params.alpha)
+    gamma_0 = _comp_gamma_0(q, disk_view.R, disk_view.h, disk_view.Omega, disk_view.rho)
+    gamma_th_coeff = _comp_gamma_th(dpressure_dlogr, disk_view, migrator_mass, params)
 
     gap_exp = np.exp(-kappa_gap / params.kappa_t)
     gamma_i = (
@@ -195,35 +195,35 @@ def compute_torque_profile(
     )
 
 
-def find_torque_zero_crossings(radius: np.ndarray, gamma_tot: np.ndarray) -> np.ndarray:
-    radius = np.asarray(radius, dtype=float)
-    values = np.asarray(gamma_tot, dtype=float)
+# def find_torque_zero_crossings(radius: np.ndarray, gamma_tot: np.ndarray) -> np.ndarray:
+#     radius = np.asarray(radius, dtype=float)
+#     values = np.asarray(gamma_tot, dtype=float)
 
-    finite = np.isfinite(radius) & np.isfinite(values)
-    radius = radius[finite]
-    values = values[finite]
+#     finite = np.isfinite(radius) & np.isfinite(values)
+#     radius = radius[finite]
+#     values = values[finite]
 
-    nonzero = values != 0.0
-    radius = radius[nonzero]
-    values = values[nonzero]
+#     nonzero = values != 0.0
+#     radius = radius[nonzero]
+#     values = values[nonzero]
 
-    if values.size < 2:
-        return np.array([], dtype=float)
+#     if values.size < 2:
+#         return np.array([], dtype=float)
 
-    order = np.argsort(radius)
-    radius = radius[order]
-    values = values[order]
+#     order = np.argsort(radius)
+#     radius = radius[order]
+#     values = values[order]
 
-    sign_changes = np.where(np.sign(values[1:]) != np.sign(values[:-1]))[0]
-    roots = []
-    for index in sign_changes:
-        r0, r1 = radius[index], radius[index + 1]
-        y0, y1 = values[index], values[index + 1]
-        roots.append(r0 - y0 * (r1 - r0) / (y1 - y0))
-    return np.asarray(roots, dtype=float)
+#     sign_changes = np.where(np.sign(values[1:]) != np.sign(values[:-1]))[0]
+#     roots = []
+#     for index in sign_changes:
+#         r0, r1 = radius[index], radius[index + 1]
+#         y0, y1 = values[index], values[index + 1]
+#         roots.append(r0 - y0 * (r1 - r0) / (y1 - y0))
+#     return np.asarray(roots, dtype=float)
 
 
-def classify_torque_crossings(
+def _classify_torque_crossings(
     torque_profile: TorqueProfile,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return stable trap and anti-trap radii in cm.
@@ -301,16 +301,18 @@ def find_traps(
     params: Optional[MigrationParameters] = None,
     fallback_radius_cm: Optional[float] = None,
 ) -> Tuple[float, float, TorqueProfile]:
-    """Compute the torque profile and select the trap used by the workflow."""
-    torque_profile = compute_torque_profile(
+
+    torque_profile = _compute_torque_profile(
         disk,
         migrator_mass_msun=migrator_mass_msun,
         smoothing=smoothing,
         params=params,
     )
-    trap_radii, antitrap_radii = classify_torque_crossings(torque_profile)
+    trap_radii, antitrap_radii = _classify_torque_crossings(torque_profile)
+
     fallback = _select_fallback_radius(torque_profile, fallback_radius_cm)
     fallback_used = trap_radii.size == 0
+
     r_trap = fallback if fallback_used else float(np.max(trap_radii))
 
     if antitrap_radii.size == 0:
@@ -321,26 +323,3 @@ def find_traps(
 
     # need detail chech
     return r_trap, r_antitrap, torque_profile
-
-
-# def find_outermost_stable_trap(
-#     disk,
-#     *,
-#     migrator_mass_msun: float = 10.0,
-#     smoothing: float = 0.005,
-#     params: Optional[MigrationParameters] = None,
-#     fallback_radius_cm: Optional[float] = None,
-# ) -> Tuple[float, np.ndarray, TorqueProfile]:
-#     """Compatibility wrapper returning the historical three-value result."""
-#     selection = find_traps(
-#         disk,
-#         migrator_mass_msun=migrator_mass_msun,
-#         smoothing=smoothing,
-#         params=params,
-#         fallback_radius_cm=fallback_radius_cm,
-#     )
-#     return (
-#         selection.r_trap_cm,
-#         selection.trap_radii_cm,
-#         selection.torque_profile,
-#     )

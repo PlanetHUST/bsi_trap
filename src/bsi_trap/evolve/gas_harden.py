@@ -117,22 +117,6 @@ def evolve_gas(
     ecc10 = 0.0
     ecc0p1 = 0.0
 
-    # # Check if binary can reach migration trap.
-    # if not np.isfinite(t_ini_s) or t_ini_s > duty_cycle_s:
-    #     return stop_cond._stop_for_trap_not_reached(BBH, i, flags, t_ini_s)
-
-    # # expected normal procedure, trap reached
-    # flags.trap_reached_flag[i] = 1
-
-    # Check if already very close to merger
-    # if (a_cm - r_th) / r_th < 1e-1:
-    #     # this maybe the result of sma distribution sampling, too small sma is non-physical, so omitted here
-    #     flags.merger_flag[i] = 0
-    #     flags.stop_reason_flag[i] = const.STOP_INITIAL_BINARY_TOO_TIGHT
-    #     bbh.ecc10[i] = np.nan  # Store nan since 10 Hz not reached
-    #     bbh.ecc0p1[i] = np.nan  # Store nan since 10 Hz not reached
-    #     return t_delay_s, t_ini_s
-
     # Evolution loop
     reached_10hz = False
     reached_0p1hz = False
@@ -184,6 +168,7 @@ def evolve_gas(
             break
 
         a_cm, e = a_new, e_new
+
         # bsi_active = t_delay_s + t_ini_s <= duty_cycle_s
 
         # a, e, m1_g, m2_g, bsi_stop_reason = bsi._apply_bsi_step(

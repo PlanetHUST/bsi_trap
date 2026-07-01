@@ -7,7 +7,7 @@ from numpy.random import Generator, SeedSequence
 
 @dataclass
 class RNGStreams:
-    """Named random-number streams for one simulation workflow."""
+    "for different types of RNG"
 
     agn: Generator
     nsc: Generator
@@ -19,13 +19,7 @@ class RNGStreams:
     resampling: Generator
 
 
-def resolve_seed(seed: int | None) -> int:
-    """
-    Resolve a possibly-None seed into an actual integer seed.
-
-    If seed is None, a fresh 128-bit seed is generated.
-    The returned seed should be logged for reproducibility.
-    """
+def resolve_seed(seed: int | None = None) -> int:
     if seed is None:
         return secrets.randbits(128)
 
@@ -33,12 +27,7 @@ def resolve_seed(seed: int | None) -> int:
 
 
 def make_rng_streams(master_seed: int) -> RNGStreams:
-    """
-    Create independent RNG streams from one master seed.
 
-    The stream order must be stable. Do not reorder these entries casually,
-    because it changes the stochastic workflow.
-    """
     parent_sequence = SeedSequence(master_seed)
 
     (

@@ -110,7 +110,16 @@ def rk4_step(Evolparams, m1, m2, a, e, h, ode_func, *ode_args):
 
 def para_evo(Evolparams, m1, m2, a, e, h, ode_func, *ode_args):
     # Take two half steps
-    a_half, e_half, hhalf = rk4_step(m1, m2, a, e, h / 2, ode_func, *ode_args)
+    a_half, e_half, hhalf = rk4_step(
+        Evolparams,
+        m1,
+        m2,
+        a,
+        e,
+        h / 2,
+        ode_func,
+        *ode_args,
+    )
     if not (
         is_physical_state(Evolparams, a_half, e_half)
         and np.isfinite(hhalf)
@@ -120,7 +129,14 @@ def para_evo(Evolparams, m1, m2, a, e, h, ode_func, *ode_args):
     h = 2 * hhalf
     # print(f'the first half parameter computed: a={a_half:.3e}, e={e_half:.3e}')
     a_full, e_full, hhalf = rk4_step(
-        Evolparams, m1, m2, a_half, e_half, h / 2, ode_func, *ode_args
+        Evolparams,
+        m1,
+        m2,
+        a_half,
+        e_half,
+        h / 2,
+        ode_func,
+        *ode_args,
     )
     if not (
         is_physical_state(Evolparams, a_full, e_full)

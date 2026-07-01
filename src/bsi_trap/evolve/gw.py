@@ -36,7 +36,7 @@ def evolve_gw_only(
     agn: AGN_properties,
     i: int,
     t_ini_s: float,
-) -> tuple[BBH_properties, float, BBH_flags]:
+) -> float:
     """
     Evolve one binary with GW emission only.
     """
@@ -67,13 +67,13 @@ def evolve_gw_only(
 
     flags.trap_reached_flag[i] = 1
 
-    # Check if already very close to merger
-    if (a - r_th) / r_th < 1e-1:
-        flags.merger_flag[i] = 0
-        flags.stop_reason_flag[i] = const.STOP_INITIAL_BINARY_TOO_TIGHT
-        bbh.ecc10[i] = np.nan  # Store nan since 10 Hz not reached
-        bbh.ecc0p1[i] = np.nan  # Store nan since 10 Hz not reached
-        return bbh, t_delay_s, flags
+    # # Check if already very close to merger
+    # if (a - r_th) / r_th < 1e-1:
+    #     flags.merger_flag[i] = 0
+    #     flags.stop_reason_flag[i] = const.STOP_INITIAL_BINARY_TOO_TIGHT
+    #     bbh.ecc10[i] = np.nan  # Store nan since 10 Hz not reached
+    #     bbh.ecc0p1[i] = np.nan  # Store nan since 10 Hz not reached
+    #     return bbh, t_delay_s, flags
 
     # Store initial state
     freq_gw = 1.0 / np.pi * np.sqrt(const.G * (m1 + m2) / a**3)
@@ -156,4 +156,4 @@ def evolve_gw_only(
     bbh.ecc10[i] = ecc10
     bbh.ecc0p1[i] = ecc0p1
 
-    return bbh, t_delay_s, flags
+    return t_delay_s

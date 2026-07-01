@@ -31,5 +31,5 @@ def BBH_params_initialize(
     bbh.th1, bbh.th2 = sample_spin_tilts(num, model_config, rng_spin)
 
 
-def single_BH_params_initialize():
-    pass
+# def single_BH_params_initialize():
+#     pass

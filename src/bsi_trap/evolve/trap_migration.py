@@ -10,7 +10,7 @@ import numpy as np
 
 from bsi_trap.classes.models import AGN_properties, DiskProfile, Embedded_BH
 from bsi_trap.disk_profile.migration_torque import (
-    classify_torque_crossings,
+    _classify_torque_crossings,
     find_traps,
 )
 from bsi_trap.functions.migration_timescale import migration_timescale_torque
@@ -89,7 +89,7 @@ def resolve_mass_dependent_trap_migration(
             )
 
             # only consider stable trap radius
-            stable_radii_cm, _ = classify_torque_crossings(torque_profile)
+            stable_radii_cm, _ = _classify_torque_crossings(torque_profile)
 
             if stable_radii_cm.size == 0:
                 continue

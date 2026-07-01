@@ -7,6 +7,7 @@ import numpy.typing as npt
 
 from bsi_trap.classes.models import DiskProfile, Embedded_BH, TrapContext
 from bsi_trap.config.model_config import ModelConfig
+from bsi_trap.evolve.timeline import PairingTimeline
 from bsi_trap.functions.pairing_physics import (
     conjunction_rate,
     effective_capture_impact_parameter,
@@ -35,6 +36,7 @@ def _eligible_pair_candidates(
     A candidate is retained only when its pair-up delay could still finish
     before the specified end time if its interaction occurred immediately.
     """
+
     waiting: IndexArray = np.asarray(waiting_idx, dtype=np.intp)
 
     # generate pair index without duplicates
@@ -208,16 +210,20 @@ def construct_pairing_up_timeline(
     smbh_mass_msun: float,
     end_time_s: float,
     rng_pair_up: np.random.Generator,
-) -> FloatArray:
-    """Construct first-generation BBH formation times up to ``end_time_s``.
+) -> PairingTimeline:
+    """Construct first-generation BBH pairing events up to ``end_time_s``.
 
-    - ``trap_flag`` is ``-1`` for objects outside the reached population,
-      ``-2`` for trap singles till the dutycycle, and stores a symmetric partner index for BBHs.
-    - ``t_pair_s`` stores the BBH formation time for both members of each pair.
-
-    Returned times have one entry per BBH and are sorted chronologically.
+    ``trap_flag`` is ``-1`` outside the reached population, ``-2`` for trap
+    singles, and a non-negative symmetric partner index for paired BBHs.
+    ``t_pair_s`` stores BBH formation time.  The returned timeline keeps both
+    the sampled encounter time and the post-encounter gas pair-up delay.
     """
+
+    ####### 1. Prepare for trap radius #######
+
+    # get single BH reaching mask, and reaching timeline
     reached_mask = np.asarray(reached_mask, dtype=bool)
+    reached_times_s = embedded_bh.t_reach_s[reached_mask]
 
     # safe check
     if reached_mask.shape != (embedded_bh.num,):
@@ -230,14 +236,12 @@ def construct_pairing_up_timeline(
     if not np.isfinite(smbh_mass_msun) or smbh_mass_msun <= 0.0:
         raise ValueError("SMBH mass must be finite and positive")
 
-    reached_times_s = embedded_bh.t_reach_s[reached_mask]
-
-    # safe check
     if np.any(~np.isfinite(reached_times_s)) or np.any(reached_times_s < 0.0):
         raise ValueError("Reached BH arrival times must be finite and nonnegative")
     if np.any(embedded_bh.m_msun[reached_mask] <= 0.0):
         raise ValueError("Reached BH masses must be positive")
 
+    # Select reaching time below dutycycle
     active_mask = reached_mask & (embedded_bh.t_reach_s < end_time_s)
 
     embedded_bh.r_pair_cm[~active_mask] = np.nan
@@ -251,6 +255,7 @@ def construct_pairing_up_timeline(
             * disk.get_scale_height_cm(disk.r_trap_cm)
         )
 
+        # safe check
         if radial_scale_cm <= 0.0:
             raise ValueError("trap_radial_dispersion_scale_heights must be positive")
 
@@ -260,6 +265,7 @@ def construct_pairing_up_timeline(
             disk.r_trap_cm,
         )
 
+        # normal distribution center offset
         offsets_cm = rng_pair_up.normal(0.0, radial_scale_cm, actual_task_mask.sum())
         offsets_cm = np.clip(
             offsets_cm,
@@ -273,8 +279,6 @@ def construct_pairing_up_timeline(
     if np.any(~np.isfinite(active_radii_cm)) or np.any(active_radii_cm <= 0.0):
         raise ValueError("Reached BH pairing radii must be finite and positive")
 
-    # -1 means trap not reaching; -2 means trap reached but final singel BH till dutycycle;
-    # now set pair-up timeline, and the pair-up index
     embedded_bh.trap_flag.fill(-1)
     embedded_bh.trap_flag[active_mask] = -2
     embedded_bh.t_pair_s.fill(np.nan)
@@ -283,18 +287,27 @@ def construct_pairing_up_timeline(
     arrival_idx = arrival_idx[
         np.argsort(embedded_bh.t_reach_s[arrival_idx], kind="stable")
     ]
+
     if arrival_idx.size == 0:
-        return np.array([], dtype=float)
+        return PairingTimeline.empty()
 
     waiting_idx: list[int] = []
+    first_indices: list[int] = []
+    second_indices: list[int] = []
+    later_arrivals_s: list[float] = []
+    encounter_times_s: list[float] = []
+    pair_delays_s: list[float] = []
     formation_times_s: list[float] = []
+
+    # step current time for constructing timeline
     current_time_s = float(embedded_bh.t_reach_s[arrival_idx[0]])
 
     def process_until(time_limit_s: float) -> None:
-        """Advance the encounter timeline up to one arrival/end boundary."""
+
         nonlocal current_time_s
 
         while len(waiting_idx) >= 2 and current_time_s < time_limit_s:
+
             event_parms = _sample_next_encounter(
                 embedded_bh=embedded_bh,
                 waiting_idx=waiting_idx,
@@ -307,11 +320,13 @@ def construct_pairing_up_timeline(
                 end_time_s=end_time_s,
                 rng_pair_up=rng_pair_up,
             )
+
             if event_parms is None:
                 return
 
             encounter_abs_time_s, first_ind, second_ind, pair_delay_s = event_parms
             bbh_formation_time_s = encounter_abs_time_s + pair_delay_s
+
             current_time_s = encounter_abs_time_s
 
             # check for dutycycle
@@ -326,6 +341,16 @@ def construct_pairing_up_timeline(
             waiting_idx.remove(first_ind)
             waiting_idx.remove(second_ind)
 
+            first_indices.append(first_ind)
+            second_indices.append(second_ind)
+            later_arrivals_s.append(
+                max(
+                    float(embedded_bh.t_reach_s[first_ind]),
+                    float(embedded_bh.t_reach_s[second_ind]),
+                )
+            )
+            encounter_times_s.append(encounter_abs_time_s)
+            pair_delays_s.append(pair_delay_s)
             formation_times_s.append(bbh_formation_time_s)
 
     for index in arrival_idx:
@@ -336,4 +361,16 @@ def construct_pairing_up_timeline(
 
     process_until(end_time_s)
 
-    return np.sort(np.asarray(formation_times_s, dtype=float))
+    if not formation_times_s:
+        return PairingTimeline.empty()
+
+    formation_array = np.asarray(formation_times_s, dtype=float)
+    order = np.argsort(formation_array, kind="stable")
+    return PairingTimeline(
+        first_idx=np.asarray(first_indices, dtype=np.intp)[order],
+        second_idx=np.asarray(second_indices, dtype=np.intp)[order],
+        later_arrival_s=np.asarray(later_arrivals_s, dtype=float)[order],
+        encounter_s=np.asarray(encounter_times_s, dtype=float)[order],
+        pair_delay_s=np.asarray(pair_delays_s, dtype=float)[order],
+        formation_s=formation_array[order],
+    )

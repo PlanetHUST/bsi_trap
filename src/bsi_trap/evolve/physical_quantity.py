@@ -44,7 +44,7 @@ def migration_threshold(
     return_q=False,
 ):
     if r is None:
-        r = AGN.rtrap
+        r = Disk.r_trap_cm
     if alpha is None:
         alpha = AGN.alpha
 
@@ -60,7 +60,7 @@ def migration_threshold(
 
     # Conservative threshold: require both conditions to be satisfied.
     qcrit = max(q_visc, q_press)
-    mcrit_msun = qcrit * AGN.M_SMBH
+    mcrit_msun = qcrit * AGN.M_SMBH_msun
 
     if return_q:
         return mcrit_msun, qcrit, h

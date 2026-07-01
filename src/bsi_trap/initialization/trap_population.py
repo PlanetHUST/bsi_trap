@@ -1,5 +1,3 @@
-"""Establish and validate the initial single-BH and BBH trap condition."""
-
 from __future__ import annotations
 
 import numpy as np
@@ -18,6 +16,7 @@ from bsi_trap.evolve.trap_migration import (
 )
 from bsi_trap.evolve.trap_context import build_trap_context
 from bsi_trap.evolve.pairing import construct_pairing_up_timeline
+from bsi_trap.evolve.timeline import PairingTimeline
 
 
 def _validate_embedded_population(ebh: Embedded_BH) -> None:
@@ -59,30 +58,23 @@ def _validate_trap_state(ebh: Embedded_BH, end_time_s: float) -> None:
             raise ValueError("BBH formation cannot precede either component arrival")
 
 
-def construct_initial_trap_condition(
+def construct_initial_trap_population(
     model_config: ModelConfig,
     agn: AGN_properties,
     disk: DiskProfile,
     ebh: Embedded_BH,
     rng_pair_up: np.random.Generator,
-) -> tuple[BBH_properties, Single_BH_properties]:
-    """Build and validate the first-generation BBH and single-BH populations.
+) -> tuple[BBH_properties, Single_BH_properties, PairingTimeline]:
+    """Build first-generation BBH/single populations and their pairing timeline."""
 
-    This is the initial-condition boundary of the workflow:
-
-    1. validate the embedded population;
-    2. calculate migration and trap arrival times;
-    3. build explicit local trap geometry;
-    4. construct the stochastic pairing timeline; and
-    5. convert the verified trap state into BBH and single-BH containers.
-    """
+    # validate ebh for safe input
     _validate_embedded_population(ebh)
 
     end_time_s = agn.lifetime_myr * Myr
     if not np.isfinite(end_time_s) or end_time_s <= 0.0:
         raise ValueError("AGN lifetime must define a finite, positive end time")
 
-    # 1. get migration timescales, traget trap radius
+    # 1. Get migration timescales, target trap radius
     migration_results = resolve_mass_dependent_trap_migration(
         agn=agn,
         disk=disk,
@@ -105,7 +97,7 @@ def construct_initial_trap_condition(
     trap_context = build_trap_context(disk, model_config)
     ebh.trap_width_cm = trap_context.width_cm
 
-    construct_pairing_up_timeline(
+    pairing_timeline = construct_pairing_up_timeline(
         embedded_bh=ebh,
         reached_mask=reached_mask,
         trap_context=trap_context,
@@ -117,6 +109,7 @@ def construct_initial_trap_condition(
     )
 
     _validate_trap_state(ebh, end_time_s)
+
     bbh = init_bbh(ebh)
     sbh = init_sbh(ebh)
 
@@ -125,24 +118,7 @@ def construct_initial_trap_condition(
     if 2 * bbh.num + sbh.num != reached_count:
         raise ValueError("Initial trap population does not conserve reached BHs")
 
-    return bbh, sbh
-
-
-def embedded_to_BBH(
-    model_config: ModelConfig,
-    agn: AGN_properties,
-    disk: DiskProfile,
-    ebh: Embedded_BH,
-    rng_pair_up: np.random.Generator,
-) -> tuple[BBH_properties, Single_BH_properties]:
-    """Compatibility wrapper for :func:`construct_initial_trap_condition`."""
-    return construct_initial_trap_condition(
-        model_config=model_config,
-        agn=agn,
-        disk=disk,
-        ebh=ebh,
-        rng_pair_up=rng_pair_up,
-    )
+    return bbh, sbh, pairing_timeline
 
 
 def init_bbh(ebh: Embedded_BH) -> BBH_properties:

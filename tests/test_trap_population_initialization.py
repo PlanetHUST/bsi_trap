@@ -35,6 +35,7 @@ from bsi_trap.classes.models import (
 )
 from bsi_trap.evolve.pairing import construct_pairing_up_timeline
 from bsi_trap.evolve.trap_context import build_trap_context
+from bsi_trap.evolve.timeline import PairingTimeline
 from bsi_trap.initialization.bbh_parameters import BBH_params_initialize
 from bsi_trap.functions.pairing_physics import (
     conjunction_rate,
@@ -47,7 +48,7 @@ from bsi_trap.functions.pairing_physics import (
 from bsi_trap.functions.random_sample import sample_embedded_radius
 from bsi_trap.initialization.embedded_bh import load_filtered_stellar_population
 from bsi_trap.initialization.trap_population import (
-    construct_initial_trap_condition,
+    construct_initial_trap_population,
     init_bbh,
     init_sbh,
 )
@@ -66,6 +67,7 @@ class InitializedTrapPopulation:
     embedded_bh: Embedded_BH
     binaries: BBH_properties
     singles: Single_BH_properties
+    pairing_timeline: PairingTimeline
 
 
 @dataclass(frozen=True)
@@ -127,7 +129,7 @@ def _initialize_population(
         catalog_tform_myr[sample_idx] * Myr,
         sample_embedded_radius(embedded_bh_num, agn, disk, rng.nsc),
     )
-    bbh, sbh = construct_initial_trap_condition(
+    bbh, sbh, pairing_timeline = construct_initial_trap_population(
         model_config=config,
         agn=agn,
         disk=disk,
@@ -142,7 +144,12 @@ def _initialize_population(
         rng_spin=rng.spin,
         model_config=config,
     )
-    return config, agn, disk, InitializedTrapPopulation(ebh, bbh, sbh)
+    return config, agn, disk, InitializedTrapPopulation(
+        ebh,
+        bbh,
+        sbh,
+        pairing_timeline,
+    )
 
 
 class TestInitialTrapCondition(unittest.TestCase):
@@ -270,7 +277,7 @@ class TestPairingTimeline(unittest.TestCase):
     @classmethod
     def _build_pairing_timeline(cls, seed: int):
         config, disk, ebh, reached_mask = cls._pairing_inputs()
-        formation_times_s = construct_pairing_up_timeline(
+        pairing_timeline = construct_pairing_up_timeline(
             embedded_bh=ebh,
             reached_mask=reached_mask,
             trap_context=build_trap_context(disk, config),
@@ -280,18 +287,25 @@ class TestPairingTimeline(unittest.TestCase):
             end_time_s=1.0e22,
             rng_pair_up=np.random.default_rng(seed),
         )
-        return ebh, formation_times_s
+        return ebh, pairing_timeline
 
     def test_pairing_uses_only_reached_singles(self) -> None:
-        ebh, formation_times_s = self._build_pairing_timeline(seed=7)
+        ebh, pairing_timeline = self._build_pairing_timeline(seed=7)
         _, disk, _, _ = self._pairing_inputs()
         paired = ebh.trap_flag >= 0
 
-        self.assertEqual(formation_times_s.shape, (2,))
-        self.assertTrue(np.all(np.diff(formation_times_s) >= 0.0))
+        self.assertEqual(pairing_timeline.formation_s.shape, (2,))
+        self.assertTrue(np.all(np.diff(pairing_timeline.formation_s) >= 0.0))
         self.assertEqual(np.count_nonzero(paired), 4)
         self.assertEqual(ebh.trap_flag[4], -1)
         self.assertTrue(np.isnan(ebh.t_pair_s[4]))
+        np.testing.assert_allclose(
+            pairing_timeline.formation_s,
+            pairing_timeline.encounter_s + pairing_timeline.pair_delay_s,
+        )
+        self.assertTrue(
+            np.all(pairing_timeline.encounter_s >= pairing_timeline.later_arrival_s)
+        )
 
         for first in np.flatnonzero(paired):
             second = int(ebh.trap_flag[first])
@@ -318,7 +332,7 @@ class TestPairingTimeline(unittest.TestCase):
         ebh.t_reach_s[:] = [1.0, 1.0]
         ebh.r_pair_cm[:] = [1.00e12, 1.90e12]
 
-        formation_times_s = construct_pairing_up_timeline(
+        pairing_timeline = construct_pairing_up_timeline(
             embedded_bh=ebh,
             reached_mask=np.array([True, True]),
             trap_context=build_trap_context(disk, config),
@@ -329,7 +343,7 @@ class TestPairingTimeline(unittest.TestCase):
             rng_pair_up=np.random.default_rng(7),
         )
 
-        self.assertEqual(formation_times_s.size, 0)
+        self.assertEqual(pairing_timeline.size, 0)
         np.testing.assert_array_equal(ebh.trap_flag, [-2, -2])
 
     def test_pair_up_timescale_uses_midplane_density(self) -> None:
@@ -362,7 +376,10 @@ class TestPairingTimeline(unittest.TestCase):
         )
         self.assertAlmostEqual(
             impact_parameter_cm,
-            min(config.pair_up_eta * expected_hill_radius_cm, trap_context.width_cm / 2.0),
+            min(
+                config.pair_up_eta * expected_hill_radius_cm,
+                trap_context.width_cm / 2.0,
+            ),
         )
 
         thin_layer_context = TrapContext(
@@ -423,10 +440,17 @@ class TestPairingTimeline(unittest.TestCase):
         )
 
     def test_pairing_is_seed_reproducible_and_converts_population(self) -> None:
-        first_ebh, first_times_s = self._build_pairing_timeline(seed=11)
-        second_ebh, second_times_s = self._build_pairing_timeline(seed=11)
+        first_ebh, first_timeline = self._build_pairing_timeline(seed=11)
+        second_ebh, second_timeline = self._build_pairing_timeline(seed=11)
 
-        np.testing.assert_array_equal(first_times_s, second_times_s)
+        np.testing.assert_array_equal(
+            first_timeline.formation_s,
+            second_timeline.formation_s,
+        )
+        np.testing.assert_array_equal(
+            first_timeline.encounter_s,
+            second_timeline.encounter_s,
+        )
         np.testing.assert_array_equal(first_ebh.trap_flag, second_ebh.trap_flag)
         np.testing.assert_array_equal(first_ebh.t_pair_s, second_ebh.t_pair_s)
 
@@ -435,7 +459,7 @@ class TestPairingTimeline(unittest.TestCase):
         self.assertEqual(bbh.num, 2)
         self.assertEqual(sbh.num, 0)
         self.assertTrue(np.all(bbh.m1_msun >= bbh.m2_msun))
-        self.assertTrue(np.all(np.isin(bbh.t_ini_s, first_times_s)))
+        self.assertTrue(np.all(np.isin(bbh.t_ini_s, first_timeline.formation_s)))
 
     def test_reached_trap_indices_exclude_unreached_bhs(self) -> None:
         ebh, _ = self._build_pairing_timeline(seed=7)
@@ -471,18 +495,15 @@ def _print_summary(label: str, values: np.ndarray, unit: str = "") -> None:
 
 
 def _formed_pair_timeline_data(
-    disk: DiskProfile,
     ebh: Embedded_BH,
+    pairing_timeline: PairingTimeline,
 ) -> PairTimelineData:
-    """Recover the encounter and gas-delay phases for every formed BBH."""
-    paired = ebh.trap_flag >= 0
-    first_idx = np.flatnonzero(paired & (ebh.trap_flag > np.arange(ebh.num)))
-    second_idx = ebh.trap_flag[first_idx]
-    if first_idx.size == 0:
+    """Attach migration starts to the explicit pairing event timeline."""
+    if pairing_timeline.size == 0:
         empty = np.empty(0, dtype=float)
         return PairTimelineData(
-            first_idx=first_idx,
-            second_idx=second_idx,
+            first_idx=pairing_timeline.first_idx,
+            second_idx=pairing_timeline.second_idx,
             migration_start_s=empty,
             arrival_s=empty,
             encounter_s=empty,
@@ -491,35 +512,19 @@ def _formed_pair_timeline_data(
         )
 
     later_component_idx = np.where(
-        ebh.t_reach_s[first_idx] >= ebh.t_reach_s[second_idx],
-        first_idx,
-        second_idx,
+        ebh.t_reach_s[pairing_timeline.first_idx]
+        >= ebh.t_reach_s[pairing_timeline.second_idx],
+        pairing_timeline.first_idx,
+        pairing_timeline.second_idx,
     )
-    pair_radius_cm = 0.5 * (
-        ebh.r_pair_cm[first_idx] + ebh.r_pair_cm[second_idx]
-    )
-    pair_up_delay_s = np.fromiter(
-        (
-            pair_up_timescale(
-                disk,
-                float(ebh.m_msun[first]),
-                float(ebh.m_msun[second]),
-                trap_radius_cm=float(radius),
-            )
-            for first, second, radius in zip(first_idx, second_idx, pair_radius_cm)
-        ),
-        dtype=float,
-        count=first_idx.size,
-    )
-    formation_s = ebh.t_pair_s[first_idx]
     return PairTimelineData(
-        first_idx=first_idx,
-        second_idx=second_idx,
+        first_idx=pairing_timeline.first_idx,
+        second_idx=pairing_timeline.second_idx,
         migration_start_s=ebh.t_form_s[later_component_idx],
-        arrival_s=ebh.t_reach_s[later_component_idx],
-        encounter_s=formation_s - pair_up_delay_s,
-        formation_s=formation_s,
-        pair_up_delay_s=pair_up_delay_s,
+        arrival_s=pairing_timeline.later_arrival_s,
+        encounter_s=pairing_timeline.encounter_s,
+        formation_s=pairing_timeline.formation_s,
+        pair_up_delay_s=pairing_timeline.pair_delay_s,
     )
 
 
@@ -551,14 +556,12 @@ def _print_population_summary(
     paired = ebh.trap_flag >= 0
     stable = np.isfinite(ebh.r_trap_target_cm)
     late = stable & ~reached
-    pair_timeline = _formed_pair_timeline_data(disk, ebh)
+    pair_timeline = _formed_pair_timeline_data(ebh, population.pairing_timeline)
     reached_indices = _reached_trap_index_data(ebh)
     single_global_indices = reached_indices.global_indices[
         ebh.trap_flag[reached_indices.global_indices] == -2
     ]
-    single_residence_s = (
-        agn.lifetime_myr * Myr - ebh.t_reach_s[single_global_indices]
-    )
+    single_residence_s = agn.lifetime_myr * Myr - ebh.t_reach_s[single_global_indices]
 
     def print_count(label: str, count: int) -> None:
         print(f"  {label:<26} {count:5d} ({count / ebh.num:6.2%})")
@@ -775,7 +778,7 @@ def _plot_trap_state_diagnostics(
     """Write one direct initialization-state view per figure."""
     ebh = population.embedded_bh
     sbh = population.singles
-    pair_timeline = _formed_pair_timeline_data(disk, ebh)
+    pair_timeline = _formed_pair_timeline_data(ebh, population.pairing_timeline)
     reached_indices = _reached_trap_index_data(ebh)
     single_global_indices = reached_indices.global_indices[
         ebh.trap_flag[reached_indices.global_indices] == -2
@@ -1111,9 +1114,7 @@ def run_diagnostics(
     )
     _print_population_summary(config, agn, disk, population)
     paths = _plot_overview_and_bbh_diagnostics(population, output_dir)
-    paths.extend(
-        _plot_trap_state_diagnostics(agn, disk, population, output_dir)
-    )
+    paths.extend(_plot_trap_state_diagnostics(agn, disk, population, output_dir))
     print("\nSaved figures:")
     for path in paths:
         print(f"  {path}")
