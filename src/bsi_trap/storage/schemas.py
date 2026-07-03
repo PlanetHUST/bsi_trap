@@ -98,8 +98,12 @@ def generation_schema(contract: HDF5Contract) -> tuple[GroupSpec, ...]:
                 *fields("m1", "m2", "chi1", "chi2"),
                 FieldSpec("A", unit="r_g", transform=radius_to_rg),
                 FieldSpec("Aini", unit="r_g", transform=radius_to_rg),
+                FieldSpec("sma_initial", unit="cm"),
+                FieldSpec("sma_final", unit="cm"),
                 *fields(
                     "sma",
+                    "ecc_initial",
+                    "ecc_final",
                     "ecc",
                     "ecc10",
                     "ecc0p1",
@@ -107,7 +111,10 @@ def generation_schema(contract: HDF5Contract) -> tuple[GroupSpec, ...]:
                     "th2",
                     "idi",
                     "mmerg",
+                    "mrem",
                     "chimerg",
+                    "chirem",
+                    "vk_cgs",
                     "trapreach_time_s",
                     "bsi_timescale_s",
                     "bsi_weak_count",
@@ -151,8 +158,24 @@ def generation_schema(contract: HDF5Contract) -> tuple[GroupSpec, ...]:
             ),
         ),
         GroupSpec(
+            group_name=contract.group_bbh_tracks,
+            source_key=contract.key_bbh_tracks,
+            fields=fields(
+                "binary_idx",
+                "step_idx",
+                "time_s",
+                "sma_cm",
+                "ecc",
+            ),
+        ),
+        GroupSpec(
             group_name=contract.group_trap_population,
             source_key=contract.key_trap_population,
+            recursive=True,
+        ),
+        GroupSpec(
+            group_name=contract.group_hierarchical_mergers,
+            source_key=contract.key_hierarchical_mergers,
             recursive=True,
         ),
     )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib import import_module
 from typing import Callable, Mapping, Any
 
 
@@ -120,9 +121,8 @@ FIGURE_DEFINITIONS: dict[str, FigureDefinition] = {
 
 def resolve_figure_function(name: str) -> Callable[..., Any]:
     """Resolve a registered plotting function lazily to avoid import cycles."""
-    from . import fig_plot
-
     definition = FIGURE_DEFINITIONS[name]
+    fig_plot = import_module("bsi_trap.plots.fig_plot")
     return getattr(fig_plot, definition.function_name)
 
 

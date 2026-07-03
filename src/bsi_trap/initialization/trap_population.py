@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from bsi_trap.classes.models import (
@@ -11,12 +13,56 @@ from bsi_trap.classes.models import (
 )
 from bsi_trap.config.model_config import ModelConfig
 from bsi_trap.constant.constant import Myr
+from bsi_trap.initialization.bbh_parameters import BBH_params_initialize
+from bsi_trap.initialization.embedded_bh import embedded_BH_initialize
 from bsi_trap.evolve.trap_migration import (
     resolve_mass_dependent_trap_migration,
 )
 from bsi_trap.evolve.trap_context import build_trap_context
 from bsi_trap.evolve.pairing import construct_pairing_up_timeline
 from bsi_trap.evolve.timeline import PairingTimeline
+
+
+@dataclass(frozen=True)
+class TrapPopulation:
+    embedded_bh: Embedded_BH
+    binaries: BBH_properties
+    singles: Single_BH_properties
+    pairing_timeline: PairingTimeline
+
+
+def make_trap_population(
+    model_config: ModelConfig,
+    agn: AGN_properties,
+    disk: DiskProfile,
+    rng_pair_up: np.random.Generator,
+    rng_nsc: np.random.Generator,
+    rng_orbit: np.random.Generator,
+    rng_spin: np.random.Generator,
+) -> TrapPopulation:
+    """Build the embedded, binary, and single BH trap populations."""
+    embedded_bh = embedded_BH_initialize(agn, disk, rng_nsc)
+    binaries, singles, pairing_timeline = construct_initial_trap_population(
+        model_config=model_config,
+        agn=agn,
+        disk=disk,
+        ebh=embedded_bh,
+        rng_pair_up=rng_pair_up,
+    )
+    BBH_params_initialize(
+        agn=agn,
+        disk=disk,
+        bbh=binaries,
+        rng_orbit=rng_orbit,
+        rng_spin=rng_spin,
+        model_config=model_config,
+    )
+    return TrapPopulation(
+        embedded_bh=embedded_bh,
+        binaries=binaries,
+        singles=singles,
+        pairing_timeline=pairing_timeline,
+    )
 
 
 def _validate_embedded_population(ebh: Embedded_BH) -> None:
@@ -158,6 +204,17 @@ def init_bbh(ebh: Embedded_BH) -> BBH_properties:
     bbh.m1_msun = ebh.m_msun[primary_idx]
     bbh.m2_msun = ebh.m_msun[secondary_idx]
     bbh.t_ini_s = formation_times_s
+
+    primary_has_spin = np.isfinite(ebh.chi[primary_idx]) & np.isfinite(
+        ebh.theta[primary_idx]
+    )
+    secondary_has_spin = np.isfinite(ebh.chi[secondary_idx]) & np.isfinite(
+        ebh.theta[secondary_idx]
+    )
+    bbh.chi1[primary_has_spin] = ebh.chi[primary_idx][primary_has_spin]
+    bbh.th1[primary_has_spin] = ebh.theta[primary_idx][primary_has_spin]
+    bbh.chi2[secondary_has_spin] = ebh.chi[secondary_idx][secondary_has_spin]
+    bbh.th2[secondary_has_spin] = ebh.theta[secondary_idx][secondary_has_spin]
     return bbh
 
 
@@ -167,4 +224,6 @@ def init_sbh(ebh: Embedded_BH) -> Single_BH_properties:
     sbh = Single_BH_properties(single_idx.size)
     sbh.m_msun = ebh.m_msun[single_idx]
     sbh.t_ini_s = ebh.t_reach_s[single_idx]
+    sbh.chi = ebh.chi[single_idx]
+    sbh.theta = ebh.theta[single_idx]
     return sbh

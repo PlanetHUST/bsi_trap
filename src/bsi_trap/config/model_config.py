@@ -24,6 +24,7 @@ class ModelConfig:
     trap_width_scale_heights: float = 1.0
     compact_object_scale_height_fraction: float = 1.0
     trap_radial_dispersion_scale_heights: float = 0.25
+    max_generations: int = 4
 
     master_seed: int | None = 20260611
 

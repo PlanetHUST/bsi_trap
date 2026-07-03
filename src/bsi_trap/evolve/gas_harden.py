@@ -17,9 +17,11 @@ from bsi_trap.evolve.numeric import (
 )
 
 import bsi_trap.constant.constant as const
+from bsi_trap.constant.stop_reason import StopReasons
 from bsi_trap.evolve import bsi
 from bsi_trap.evolve import physical_quantity as pq
 from bsi_trap.evolve import stop_conditions as stop_cond
+from bsi_trap.evolve.tracks import append_bbh_track
 
 
 def ode_with_gas(
@@ -85,6 +87,8 @@ def evolve_gas(
     bbh: BBH_properties,
     agn: AGN_properties,
     i: int,
+    *,
+    bsi_enabled: bool = False,
 ) -> float:
     """
     Evolve one binary through the gas hardening phase until merger or stop condition is met.
@@ -106,6 +110,12 @@ def evolve_gas(
 
     # Time limits
     t_hubble_s = const.tHubble * const.Myr
+    time_limit_s = min(duty_cycle_s, t_hubble_s)
+    time_limit_reason = (
+        const.STOP_HUBBLE_LIMIT
+        if t_hubble_s <= duty_cycle_s
+        else StopReasons.STOP_AGN_LIFETIME
+    )
     t_est_s = pq.compute_merger_time_estimate(m1_g, m2_g, a_cm, e)
 
     # Initialize
@@ -116,6 +126,9 @@ def evolve_gas(
     t_delay_s = 0.0
     ecc10 = 0.0
     ecc0p1 = 0.0
+    track_time_s = [float(t_ini_s)]
+    track_sma_cm = [float(a_cm)]
+    track_ecc = [float(e)]
 
     # Evolution loop
     reached_10hz = False
@@ -126,6 +139,52 @@ def evolve_gas(
     while (a_cm - r_th) / r_th > 1e-1 and loop_num < max_loops:
         if stop_cond._stop_for_walltime(flags, i):
             break
+
+        remaining_time_s = time_limit_s - (t_ini_s + t_delay_s)
+        if remaining_time_s <= 0.0:
+            flags.continue_ng_flag[i] = 0
+            flags.merger_flag[i] = 0
+            flags.stop_reason_flag[i] = time_limit_reason
+            break
+
+        smooth_step_limit_s = remaining_time_s
+        bsi_active = (
+            bsi_enabled
+            and bbh.bsi_applied_flag[i] == 0
+            and t_delay_s + t_ini_s <= duty_cycle_s
+        )
+        if bsi_active:
+            bsi_delay_s = float(bbh.bsi_timescale_s[i])
+            if np.isfinite(bsi_delay_s) and bsi_delay_s >= t_delay_s:
+                time_to_bsi_s = bsi_delay_s - t_delay_s
+                if time_to_bsi_s <= 0.0:
+                    was_applied = bbh.bsi_applied_flag[i]
+                    a_cm, e, m1_g, m2_g, bsi_stop_reason = (
+                        bsi.apply_scheduled_bsi_step(
+                            Evolparams,
+                            bbh,
+                            flags,
+                            i,
+                            a_cm,
+                            e,
+                            m1_g,
+                            m2_g,
+                            t_delay_s,
+                            0.0,
+                            bsi_active=True,
+                        )
+                    )
+                    if bbh.bsi_applied_flag[i] != was_applied:
+                        track_time_s.append(float(t_ini_s + t_delay_s))
+                        track_sma_cm.append(float(a_cm))
+                        track_ecc.append(float(e))
+                    if bsi_stop_reason is not None:
+                        flags.merger_flag[i] = 0
+                        flags.continue_ng_flag[i] = 0
+                        flags.stop_reason_flag[i] = bsi_stop_reason
+                        break
+                else:
+                    smooth_step_limit_s = min(smooth_step_limit_s, time_to_bsi_s)
 
         freq_gw = pq.frequency_from_sma(m1_g, m2_g, a_cm)
         loop_num += 1
@@ -146,43 +205,75 @@ def evolve_gas(
             )
             reached_0p1hz = True
 
-        # Check if still within AGN duty cycle
-        if t_delay_s + t_ini_s <= duty_cycle_s:
-            # normal evolution in the period of dutycycle
-            flags.continue_ng_flag[i] = 1
+        flags.continue_ng_flag[i] = 1
 
-            # Evolve with gas hardening
-            a_new, e_new, h = para_evo(
-                Evolparams, m1_g, m2_g, a_cm, e, h, ode_with_gas, agn, disk
-            )
-        else:
-            # AGN disk closed, evolve with GW only
-            flags.continue_ng_flag[i] = 0
+        def record_smooth_state(elapsed_s, sma_cm, eccentricity):
+            track_time_s.append(float(t_ini_s + t_delay_s + elapsed_s))
+            track_sma_cm.append(float(sma_cm))
+            track_ecc.append(float(eccentricity))
 
-            a_new, e_new, h = para_evo(Evolparams, m1_g, m2_g, a_cm, e, h, ode_gw_only)
+        # Evolve with gas hardening while the AGN disk is active.
+        a_new, e_new, h = para_evo(
+            Evolparams,
+            m1_g,
+            m2_g,
+            a_cm,
+            e,
+            h,
+            ode_with_gas,
+            agn,
+            disk,
+            max_step_s=smooth_step_limit_s,
+            state_callback=record_smooth_state,
+        )
 
         if not (
             is_physical_state(Evolparams, a_new, e_new) and np.isfinite(h) and h > 0.0
         ):
-            # stop_cond._stop_for_invalid_step(flags, i)
+            stop_cond.stop_for_invalid_step(flags, i)
             break
 
         a_cm, e = a_new, e_new
 
-        # bsi_active = t_delay_s + t_ini_s <= duty_cycle_s
+        # BSI is a discrete update on top of the smooth gas/GW step.  The
+        # timeline is built later from the flags and delay; the physical
+        # perturbation belongs here while the local orbital state is current.
+        was_applied = bbh.bsi_applied_flag[i]
+        bsi_active = (
+            bsi_enabled
+            and was_applied == 0
+            and t_delay_s + t_ini_s <= duty_cycle_s
+        )
+        a_cm, e, m1_g, m2_g, bsi_stop_reason = bsi.apply_scheduled_bsi_step(
+            Evolparams,
+            bbh,
+            flags,
+            i,
+            a_cm,
+            e,
+            m1_g,
+            m2_g,
+            t_delay_s,
+            h,
+            bsi_active=bsi_active,
+        )
+        if bbh.bsi_applied_flag[i] != was_applied:
+            track_time_s.append(float(t_ini_s + bbh.bsi_timescale_s[i]))
+            track_sma_cm.append(float(a_cm))
+            track_ecc.append(float(e))
 
-        # a, e, m1_g, m2_g, bsi_stop_reason = bsi._apply_bsi_step(
-        #     BBH, flags, i, a, e, m1_g, m2_g, h, bsi_active=bsi_active
-        # )
+        if bsi_stop_reason is not None:
+            flags.merger_flag[i] = 0
+            flags.continue_ng_flag[i] = 0
+            flags.stop_reason_flag[i] = bsi_stop_reason
+            t_delay_s = float(bbh.bsi_timescale_s[i])
+            break
 
         r_th = pq.threshold_radius(m1_g, m2_g)
         freq_gw = pq.frequency_from_sma(m1_g, m2_g, a_cm)
 
         # Update time
         t_delay_s += h
-
-        # if bsi_stop_reason is not None:
-        #     break
 
         # Check time limits
         if t_delay_s + t_ini_s > t_hubble_s:
@@ -198,6 +289,12 @@ def evolve_gas(
             # Store final state before break
             break
 
+        if t_delay_s + t_ini_s >= duty_cycle_s:
+            flags.continue_ng_flag[i] = 0
+            flags.merger_flag[i] = 0
+            flags.stop_reason_flag[i] = time_limit_reason
+            break
+
         if loop_num >= max_loops:
             print(f"Warning: Max loops reached for binary {i}")
             flags.merger_flag[i] = 0
@@ -205,7 +302,16 @@ def evolve_gas(
             break
 
     # Store results
+    bbh.sma_cm[i] = a_cm
+    bbh.ecc[i] = e
     bbh.ecc10[i] = ecc10
     bbh.ecc0p1[i] = ecc0p1
+    append_bbh_track(
+        bbh,
+        binary_idx=i,
+        time_s=track_time_s,
+        sma_cm=track_sma_cm,
+        ecc=track_ecc,
+    )
 
     return t_delay_s

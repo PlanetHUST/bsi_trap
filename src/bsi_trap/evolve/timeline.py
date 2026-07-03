@@ -74,7 +74,7 @@ class PairingTimeline:
 
 
 @dataclass(frozen=True)
-class BsiTimeline:
+class BSI_Timeline:
     """Resolved binary-single interaction events with absolute event times."""
 
     binary_idx: IndexArray
@@ -85,14 +85,14 @@ class BsiTimeline:
         expected_shape = self.event_s.shape
         for name in ("binary_idx", "event_type"):
             if getattr(self, name).shape != expected_shape:
-                raise ValueError("BsiTimeline arrays must have matching shapes")
+                raise ValueError("BSI_Timeline arrays must have matching shapes")
         if len(expected_shape) != 1:
-            raise ValueError("BsiTimeline arrays must be one-dimensional")
+            raise ValueError("BSI_Timeline arrays must be one-dimensional")
         if np.any(~np.isfinite(self.event_s)) or np.any(self.event_s < 0.0):
-            raise ValueError("BsiTimeline event times must be finite and nonnegative")
+            raise ValueError("BSI_Timeline event times must be finite and nonnegative")
 
     @classmethod
-    def empty(cls) -> "BsiTimeline":
+    def empty(cls) -> "BSI_Timeline":
         return cls(
             binary_idx=np.empty(0, dtype=np.intp),
             event_s=np.empty(0, dtype=float),
@@ -113,7 +113,7 @@ class BsiTimeline:
 
 
 @dataclass(frozen=True)
-class BbhEvolutionTimeline:
+class EvolutionTimeline:
     """Absolute-time outcome timeline for one evolved BBH generation."""
 
     binary_idx: IndexArray
@@ -123,7 +123,7 @@ class BbhEvolutionTimeline:
     merger_s: FloatArray
     merged: BoolArray
     stop_reason: IntArray
-    bsi_timeline: BsiTimeline
+    bsi_timeline: BSI_Timeline
 
     def __post_init__(self) -> None:
         expected_shape = self.start_s.shape
@@ -137,10 +137,10 @@ class BbhEvolutionTimeline:
         ):
             if getattr(self, name).shape != expected_shape:
                 raise ValueError(
-                    "BbhEvolutionTimeline arrays must have matching shapes"
+                    "EvolutionTimeline arrays must have matching shapes"
                 )
         if len(expected_shape) != 1:
-            raise ValueError("BbhEvolutionTimeline arrays must be one-dimensional")
+            raise ValueError("EvolutionTimeline arrays must be one-dimensional")
         if np.any(~np.isfinite(self.start_s)):
             raise ValueError("BBH evolution start times must be finite")
         if np.any(~np.isfinite(self.delay_s)) or np.any(self.delay_s < 0.0):
@@ -154,7 +154,9 @@ class BbhEvolutionTimeline:
             raise ValueError("Unmerged BBHs must not have merger times")
 
     @classmethod
-    def empty(cls, bsi_timeline: BsiTimeline | None = None) -> "BbhEvolutionTimeline":
+    def empty(
+        cls, bsi_timeline: BSI_Timeline | None = None
+    ) -> "EvolutionTimeline":
         empty_idx = np.empty(0, dtype=np.intp)
         empty_float = np.empty(0, dtype=float)
         return cls(
@@ -165,7 +167,9 @@ class BbhEvolutionTimeline:
             merger_s=empty_float,
             merged=np.empty(0, dtype=bool),
             stop_reason=np.empty(0, dtype=np.int64),
-            bsi_timeline=BsiTimeline.empty() if bsi_timeline is None else bsi_timeline,
+            bsi_timeline=BSI_Timeline.empty()
+            if bsi_timeline is None
+            else bsi_timeline,
         )
 
     @property

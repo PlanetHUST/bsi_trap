@@ -1,0 +1,17 @@
+{
+  "success": true,
+  "model_index": 0,
+  "sample_index": 0,
+  "smbh_mass": 1000000.0,
+  "output_file": "output/disk_trap_single_bbh/sample_0000_gen_001.h5",
+  "generation_files": [
+    "output/disk_trap_single_bbh/sample_0000_gen_001.h5"
+  ],
+  "manifest_file": "output/disk_trap_single_bbh/manifest_sample_0000.json",
+  "metadata_file": "temp/model_0_sample_0.json",
+  "execution_time": 60.98450057199989,
+  "merger_count": 0,
+  "evolved_binary_count": 2019,
+  "generation_count": 1,
+  "error": null
+}

@@ -53,11 +53,26 @@ def adaptive_timestep(Evolparams, a, e, ka, ke, h):
     return h
 
 
-def rk4_step(Evolparams, m1, m2, a, e, h, ode_func, *ode_args):
+def rk4_step(
+    Evolparams,
+    m1,
+    m2,
+    a,
+    e,
+    h,
+    ode_func,
+    *ode_args,
+    max_step_s=None,
+):
     """4th order Runge-Kutta integration step"""
     if not is_physical_state(Evolparams, a, e):
         logging.warning(f"Attempting RK4 step from non-physical state: a={a}, e={e}")
         return np.nan, np.nan, np.nan
+
+    if max_step_s is not None:
+        if not np.isfinite(max_step_s) or max_step_s <= 0.0:
+            return np.nan, np.nan, np.nan
+        h = min(h, max_step_s)
 
     h_try = h
 
@@ -67,6 +82,8 @@ def rk4_step(Evolparams, m1, m2, a, e, h, ode_func, *ode_args):
         if not np.isfinite(h_step) or h_step <= 0.0:
             h_try *= 0.1
             continue
+        if max_step_s is not None:
+            h_step = min(h_step, max_step_s)
 
         a2 = a + 0.5 * h_step * k1_a
         e2 = e + 0.5 * h_step * k1_e
@@ -108,7 +125,23 @@ def rk4_step(Evolparams, m1, m2, a, e, h, ode_func, *ode_args):
     return np.nan, np.nan, np.nan
 
 
-def para_evo(Evolparams, m1, m2, a, e, h, ode_func, *ode_args):
+def para_evo(
+    Evolparams,
+    m1,
+    m2,
+    a,
+    e,
+    h,
+    ode_func,
+    *ode_args,
+    max_step_s=None,
+    state_callback=None,
+):
+    if max_step_s is not None:
+        if not np.isfinite(max_step_s) or max_step_s <= 0.0:
+            return np.nan, np.nan, np.nan
+        h = min(h, max_step_s)
+
     # Take two half steps
     a_half, e_half, hhalf = rk4_step(
         Evolparams,
@@ -119,6 +152,7 @@ def para_evo(Evolparams, m1, m2, a, e, h, ode_func, *ode_args):
         h / 2,
         ode_func,
         *ode_args,
+        max_step_s=None if max_step_s is None else max_step_s / 2.0,
     )
     if not (
         is_physical_state(Evolparams, a_half, e_half)
@@ -126,9 +160,11 @@ def para_evo(Evolparams, m1, m2, a, e, h, ode_func, *ode_args):
         and hhalf > 0.0
     ):
         return np.nan, np.nan, np.nan
-    h = 2 * hhalf
+    first_half_s = float(hhalf)
+
+    h = 2 * first_half_s
     # print(f'the first half parameter computed: a={a_half:.3e}, e={e_half:.3e}')
-    a_full, e_full, hhalf = rk4_step(
+    a_full, e_full, second_hhalf = rk4_step(
         Evolparams,
         m1,
         m2,
@@ -137,14 +173,19 @@ def para_evo(Evolparams, m1, m2, a, e, h, ode_func, *ode_args):
         h / 2,
         ode_func,
         *ode_args,
+        max_step_s=None if max_step_s is None else max_step_s / 2.0,
     )
     if not (
         is_physical_state(Evolparams, a_full, e_full)
-        and np.isfinite(hhalf)
-        and hhalf > 0.0
+        and np.isfinite(second_hhalf)
+        and second_hhalf > 0.0
     ):
         return np.nan, np.nan, np.nan
-    return a_full, e_full, 2 * hhalf
+    total_step_s = first_half_s + float(second_hhalf)
+    if state_callback is not None:
+        state_callback(first_half_s, a_half, e_half)
+        state_callback(total_step_s, a_full, e_full)
+    return a_full, e_full, total_step_s
 
 
 def interp_profile(radius, values, target, default=np.nan):

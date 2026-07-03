@@ -16,7 +16,9 @@ class HDF5Contract:
     key_bbh: str = "BBH"
     key_flags: str = "flags"
     key_timescales: str = "timescales"
+    key_bbh_tracks: str = "bbh_tracks"
     key_trap_population: str = "trap_population"
+    key_hierarchical_mergers: str = "hierarchical_mergers"
     key_model_config: str = "model_config"
     key_generation_type: str = "generation_type"
     key_process_id: str = "process_id"
@@ -28,7 +30,9 @@ class HDF5Contract:
     group_bbh: str = "bbh_properties"
     group_flags: str = "flags"
     group_timescales: str = "timescales"
+    group_bbh_tracks: str = "bbh_tracks"
     group_trap_population: str = "trap_population"
+    group_hierarchical_mergers: str = "hierarchical_mergers"
 
     # HDF5 attrs
     attr_sample_index: str = "sample_index"
@@ -80,3 +84,6 @@ class HDF5Contract:
             return None
 
         return int(suffix)
+
+
+StorageContract = HDF5Contract

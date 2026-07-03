@@ -1,10 +1,9 @@
 import argparse
-import logging
 
-from cli.simulation import add_simulation_parser
-from cli.data_analysis import add_analysis_parser
-from cli.plot import add_plot_parser
-from bsi_trap.parallel_compute import configure_logging
+from cli.analyze_command import add_analyze_parser
+from cli.common import add_log_level_argument, configure_logging_from_args
+from cli.plot_command import add_plot_parser
+from cli.simulate_command import add_simulate_parser
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -13,17 +12,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="BSI Trap simulation command-line interface.",
     )
 
-    parser.add_argument(
-        "--log-level",
-        default="INFO",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-        help="Logging level.",
-    )
+    add_log_level_argument(parser)
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    add_simulation_parser(subparsers)
-    add_analysis_parser(subparsers)
+    add_simulate_parser(subparsers)
+    add_analyze_parser(subparsers)
     add_plot_parser(subparsers)
 
     return parser
@@ -33,7 +27,7 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
-    configure_logging(getattr(logging, args.log_level))
+    configure_logging_from_args(args)
 
     args.func(args)
 

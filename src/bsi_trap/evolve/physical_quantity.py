@@ -1,3 +1,5 @@
+from typing import Literal, overload
+
 import numpy as np
 
 import bsi_trap.constant.constant as const
@@ -36,31 +38,51 @@ def compute_eccentricity_at_frequency(m1, m2, a, e, target_freq):
     return float(e) if np.isfinite(e) else np.nan
 
 
+@overload
 def migration_threshold(
     Disk: DiskProfile,
     AGN: AGN_properties,
-    r=None,
-    alpha=None,
-    return_q=False,
-):
+    r: float | None = None,
+    alpha: float | None = None,
+    return_q: Literal[False] = False,
+) -> float: ...
+
+
+@overload
+def migration_threshold(
+    Disk: DiskProfile,
+    AGN: AGN_properties,
+    r: float | None = None,
+    alpha: float | None = None,
+    return_q: Literal[True] = True,
+) -> tuple[float, float, float]: ...
+
+
+def migration_threshold(
+    Disk: DiskProfile,
+    AGN: AGN_properties,
+    r: float | None = None,
+    alpha: float | None = None,
+    return_q: bool = False,
+) -> float | tuple[float, float, float]:
     if r is None:
         r = Disk.r_trap_cm
     if alpha is None:
         alpha = AGN.alpha
 
-    h = Disk.get_h(r)
+    h = float(Disk.get_h(r))
 
     # Gap-opening threshold:
     # q_gap ~ sqrt(27*pi/8) * alpha^(1/2) * (H/r)^(5/2)
-    q_visc = np.sqrt(27.0 * np.pi / 8.0) * np.sqrt(alpha) * h**2.5
+    q_visc = float(np.sqrt(27.0 * np.pi / 8.0) * np.sqrt(alpha) * h**2.5)
 
     # Pressure-closing condition:
     # H/r < (1/40) * sqrt(q/alpha)  ->  q > 1600 * alpha * (H/r)^2
-    q_press = 1600.0 * alpha * h**2
+    q_press = float(1600.0 * alpha * h**2)
 
     # Conservative threshold: require both conditions to be satisfied.
-    qcrit = max(q_visc, q_press)
-    mcrit_msun = qcrit * AGN.M_SMBH_msun
+    qcrit = float(max(q_visc, q_press))
+    mcrit_msun = float(qcrit * AGN.M_SMBH_msun)
 
     if return_q:
         return mcrit_msun, qcrit, h

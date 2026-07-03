@@ -47,13 +47,13 @@ from bsi_trap.functions.pairing_physics import (
 )
 from bsi_trap.functions.random_sample import sample_embedded_radius
 from bsi_trap.initialization.embedded_bh import load_filtered_stellar_population
+from bsi_trap.initialization.environment import make_environment
 from bsi_trap.initialization.trap_population import (
     construct_initial_trap_population,
     init_bbh,
     init_sbh,
 )
 from bsi_trap.plots.fig_storage import ensure_dir, save_figure
-from workflow import simulation
 
 TEST_EMBEDDED_BH_NUM = 2000
 TEST_PAIR_UP_ETA = 2.5
@@ -113,7 +113,7 @@ def _initialize_population(
         pair_up_eta=pair_up_eta,
         master_seed=seed,
     )
-    agn, disk = simulation._build_environment(config, smbh_mass=smbh_mass_msun)
+    agn, disk = make_environment(config, smbh_mass=smbh_mass_msun)
     rng = make_rng_streams(seed)
 
     _, catalog_mass_msun, catalog_tform_myr = load_filtered_stellar_population()

@@ -15,7 +15,10 @@ def get_node(root: h5py.Group | h5py.File, path: str) -> h5py.Group | h5py.Datas
     for part in normalized.split("/"):
         if not isinstance(current, h5py.Group) or part not in current:
             return None
-        current = current[part]
+        node = current[part]
+        if isinstance(node, h5py.Datatype):
+            return None
+        current = node
 
     return current
 

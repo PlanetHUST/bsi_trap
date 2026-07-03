@@ -37,7 +37,11 @@ class SimulationResult:
     sample_index: int
     smbh_mass: float
     output_file: str | None = None
+    generation_files: tuple[str, ...] | None = None
+    manifest_file: str | None = None
+    metadata_file: str | None = None
     execution_time: float | None = None
     merger_count: int | None = None
+    evolved_binary_count: int | None = None
     generation_count: int | None = None
     error: str | None = None

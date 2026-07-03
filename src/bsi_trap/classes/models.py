@@ -142,6 +142,8 @@ class Embedded_BH(object):
         self.R_cm: FloatArray = np.zeros(num, dtype=np.float64)
         self.r_trap_target_cm: FloatArray = np.full(num, np.nan, dtype=np.float64)
         self.r_pair_cm: FloatArray = np.full(num, np.nan, dtype=np.float64)
+        self.chi: FloatArray = np.full(num, np.nan, dtype=np.float64)
+        self.theta: FloatArray = np.full(num, np.nan, dtype=np.float64)
         self.trap_width_cm: float = np.nan
         self.trap_flag: IntArray = np.full(num, -1, dtype=np.int64)
 
@@ -177,6 +179,8 @@ class BBH_properties(object):
         self.idi = np.zeros(num, int)
         self.m1_msun = np.zeros(num, float)
         self.m2_msun = np.zeros(num, float)
+        self.sma_initial_cm = np.full(num, np.nan, float)
+        self.ecc_initial = np.full(num, np.nan, float)
         self.sma_cm = np.zeros(num, float)
         self.ecc = np.zeros(num, float)
 
@@ -198,6 +202,16 @@ class BBH_properties(object):
 
         self.t_ini_s = np.zeros(num, float)
         self.t_del_s = np.zeros(num, float)
+        self.bsi_timescale_s = np.full(num, np.nan, float)
+        self.bsi_applied_flag = np.zeros(num, int)
+        self.bsi_weak_count = np.zeros(num, int)
+        self.bsi_delta_e_total = np.zeros(num, float)
+        self.bsi_delta_theta_total = np.zeros(num, float)
+        self.track_binary_idx = np.empty(0, dtype=np.int64)
+        self.track_step_idx = np.empty(0, dtype=np.int64)
+        self.track_time_s = np.empty(0, dtype=np.float64)
+        self.track_sma_cm = np.empty(0, dtype=np.float64)
+        self.track_ecc = np.empty(0, dtype=np.float64)
         self.flags = BBH_flags(num)
 
 
@@ -208,6 +222,8 @@ class Single_BH_properties(object):
         self.num = num
         self.m_msun = np.zeros(num, float)
         self.t_ini_s = np.zeros(num, float)
+        self.chi = np.full(num, np.nan, float)
+        self.theta = np.full(num, np.nan, float)
 
 
 class BBHEvolverParams:

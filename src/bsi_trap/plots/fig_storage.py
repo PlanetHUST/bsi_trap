@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 
 
 def ensure_dir(path: str | Path) -> Path:
@@ -25,7 +26,7 @@ def stem_with_suffix(stem: str, filename_suffix: str | None = None) -> str:
     return f"{stem}_{safe}" if safe else stem
 
 
-def save_figure(fig: plt.Figure, outdir: str | Path, stem: str, dpi: int = 300) -> Path:
+def save_figure(fig: Figure, outdir: str | Path, stem: str, dpi: int = 300) -> Path:
     """Save a figure as PDF and PNG, returning the PDF path."""
     out = ensure_dir(outdir)
     pdf_path = out / f"{stem}.pdf"

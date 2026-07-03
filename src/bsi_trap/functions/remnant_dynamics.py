@@ -2,7 +2,7 @@ import numpy as np
 
 import bsi_trap.constant.constant as const
 from bsi_trap.functions import merger_properties as merg
-from bsi_trap.functions.nsc_population import mass_R_NSC
+from bsi_trap.functions.nsc_population import mass_enclosed_NSC
 
 # def apply_recoil_and_orbit_update(BBH, AGN, flags, i, rmax):
 #     """Apply GW recoil and update the remnant's post-merger outer orbit."""
@@ -41,7 +41,7 @@ def apply_recoil_and_orbit_update(
         BBH.th2[i],
     )
 
-    enclosed_mass_msun = agn.M_SMBH_msun + mass_R_NSC(
+    enclosed_mass_msun = agn.M_SMBH_msun + mass_enclosed_NSC(
         agn.M_SMBH_msun,
         r_trap_cm,
     )

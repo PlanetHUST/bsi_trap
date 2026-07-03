@@ -65,6 +65,7 @@ class ParallelSimulationManager:
                     task,
                     self.config.base_seed,
                     self.config.output_dir,
+                    self.config.temp_dir,
                     self.physics_callback,
                 )
                 for task in tasks

@@ -12,6 +12,16 @@ from .catalog import write_sample_catalog
 from .contract import HDF5Contract
 
 
+def _int_attr(h5obj: h5py.File | h5py.Group, name: str, default: int) -> int:
+    value = h5obj.attrs.get(name, default)
+    return int(np.asarray(value).item())
+
+
+def _float_attr(h5obj: h5py.File | h5py.Group, name: str, default: float) -> float:
+    value = h5obj.attrs.get(name, default)
+    return float(np.asarray(value).item())
+
+
 def _require_attrs(
     h5f: h5py.File,
     path: Path,
@@ -48,13 +58,18 @@ def _copy_agn_to_sample(
         return
 
     agn_group = source[contract.group_agn]
+    if not isinstance(agn_group, h5py.Group):
+        return
 
     for key, value in agn_group.attrs.items():
         sample_group.attrs[key] = value
 
     for key in agn_group.keys():
+        node = agn_group[key]
+        if not isinstance(node, h5py.Dataset):
+            continue
         if key not in sample_group:
-            sample_group.create_dataset(key, data=agn_group[key][()])
+            sample_group.create_dataset(key, data=node[()])
 
 
 def _create_sample_group(
@@ -70,11 +85,15 @@ def _create_sample_group(
 
     sample_group.attrs[contract.attr_sample_index] = sample_index
     sample_group.attrs[contract.attr_simulation_type] = simulation_type
-    sample_group.attrs[contract.attr_process_id] = int(
-        source_file.attrs.get(contract.attr_process_id, -1)
+    sample_group.attrs[contract.attr_process_id] = _int_attr(
+        source_file,
+        contract.attr_process_id,
+        -1,
     )
-    sample_group.attrs[contract.attr_smbh_mass_msun] = float(
-        source_file.attrs.get(contract.attr_smbh_mass_msun, np.nan)
+    sample_group.attrs[contract.attr_smbh_mass_msun] = _float_attr(
+        source_file,
+        contract.attr_smbh_mass_msun,
+        np.nan,
     )
 
     _copy_model_attrs(source_file, sample_group, contract)
@@ -102,8 +121,8 @@ def _read_generation_file_index(
     with h5py.File(h5_file, "r") as h5f:
         _require_attrs(h5f, h5_file, contract)
 
-        sample_index = int(h5f.attrs[contract.attr_sample_index])
-        generation = int(h5f.attrs[contract.attr_generation])
+        sample_index = _int_attr(h5f, contract.attr_sample_index, -1)
+        generation = _int_attr(h5f, contract.attr_generation, -1)
 
     return sample_index, generation, h5_file
 
@@ -166,7 +185,10 @@ def combine_all_files(
                             contract=contract,
                         )
                     else:
-                        sample_group = samples_group[sample_name]
+                        node = samples_group[sample_name]
+                        if not isinstance(node, h5py.Group):
+                            raise TypeError(f"{sample_name} is not an HDF5 group")
+                        sample_group = node
 
                     generation_name = contract.generation_group_name(generation)
 
