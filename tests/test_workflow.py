@@ -43,6 +43,20 @@ from workflow.analysis_run import run_analysis_workflow
 from workflow.plot_run import run_plotting_workflow
 
 
+def _h5_group(h5f: h5py.File, path: str) -> h5py.Group:
+    node = h5f[path]
+    if not isinstance(node, h5py.Group):
+        raise AssertionError(f"{path} is not an HDF5 group")
+    return node
+
+
+def _h5_array(h5f: h5py.File, path: str) -> np.ndarray:
+    node = h5f[path]
+    if not isinstance(node, h5py.Dataset):
+        raise AssertionError(f"{path} is not an HDF5 dataset")
+    return np.asarray(node[()])
+
+
 def _disk() -> DiskProfile:
     return DiskProfile(
         radius_cm=np.array([1.0e12, 2.0e12]),
@@ -262,37 +276,40 @@ class TestWorkflow(TestCase):
                 self.assertIn(contract.group_bbh_tracks, h5f)
                 self.assertIn(contract.group_trap_population, h5f)
                 self.assertIn(contract.group_hierarchical_mergers, h5f)
-                self.assertIn("mrem", h5f[contract.group_bbh])
-                self.assertIn("vk_cgs", h5f[contract.group_bbh])
+                bbh_group = _h5_group(h5f, contract.group_bbh)
+                self.assertIn("mrem", bbh_group)
+                self.assertIn("vk_cgs", bbh_group)
                 np.testing.assert_allclose(
-                    h5f[f"{contract.group_bbh}/sma_initial"][()],
+                    _h5_array(h5f, f"{contract.group_bbh}/sma_initial"),
                     np.array([1.2e11]),
                 )
                 np.testing.assert_allclose(
-                    h5f[f"{contract.group_bbh}/ecc_initial"][()],
+                    _h5_array(h5f, f"{contract.group_bbh}/ecc_initial"),
                     np.array([0.2]),
                 )
                 np.testing.assert_allclose(
-                    h5f[f"{contract.group_bbh}/sma_final"][()],
+                    _h5_array(h5f, f"{contract.group_bbh}/sma_final"),
                     np.array([1.0e11]),
                 )
                 np.testing.assert_allclose(
-                    h5f[f"{contract.group_timescales}/tdel_myr"][()],
+                    _h5_array(h5f, f"{contract.group_timescales}/tdel_myr"),
                     np.array([5.0]) / 3.1557600e13,
                 )
                 np.testing.assert_allclose(
-                    h5f[f"{contract.group_timescales}/tmerg_myr"][()],
+                    _h5_array(h5f, f"{contract.group_timescales}/tmerg_myr"),
                     np.array([13.0]) / 3.1557600e13,
                 )
                 self.assertTrue(
-                    np.isnan(h5f[f"{contract.group_timescales}/t_bsi_myr"][0])
+                    np.isnan(
+                        _h5_array(h5f, f"{contract.group_timescales}/t_bsi_myr")[0]
+                    )
                 )
                 np.testing.assert_allclose(
-                    h5f[f"{contract.group_bbh_tracks}/sma_cm"][()],
+                    _h5_array(h5f, f"{contract.group_bbh_tracks}/sma_cm"),
                     np.array([1.2e11, 1.0e11]),
                 )
                 np.testing.assert_allclose(
-                    h5f[f"{contract.group_bbh_tracks}/ecc"][()],
+                    _h5_array(h5f, f"{contract.group_bbh_tracks}/ecc"),
                     np.array([0.2, 0.1]),
                 )
 
@@ -379,8 +396,10 @@ class TestWorkflow(TestCase):
             )
 
             self.assertTrue(result.success)
-            self.assertIsNotNone(result.metadata_file)
-            metadata = json.loads(Path(result.metadata_file).read_text(encoding="utf-8"))
+            metadata_file = result.metadata_file
+            self.assertIsNotNone(metadata_file)
+            assert metadata_file is not None
+            metadata = json.loads(Path(metadata_file).read_text(encoding="utf-8"))
             self.assertEqual(metadata["sample_index"], 3)
             self.assertEqual(metadata["merger_count"], 2)
             self.assertEqual(metadata["evolved_binary_count"], 4)

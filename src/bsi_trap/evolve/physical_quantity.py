@@ -76,7 +76,6 @@ def migration_threshold(
     AGN: AGN_properties,
     r: float | None = None,
     alpha: float | None = None,
-    return_q: Literal[False] = False,
 ) -> float: ...
 
 
@@ -86,7 +85,39 @@ def migration_threshold(
     AGN: AGN_properties,
     r: float | None = None,
     alpha: float | None = None,
-    return_q: Literal[True] = True,
+    *,
+    return_q: Literal[True],
+) -> tuple[float, float, float]: ...
+
+
+@overload
+def migration_threshold(
+    Disk: DiskProfile,
+    AGN: AGN_properties,
+    r: float | None = None,
+    alpha: float | None = None,
+    *,
+    return_q: Literal[False],
+) -> float: ...
+
+
+@overload
+def migration_threshold(
+    Disk: DiskProfile,
+    AGN: AGN_properties,
+    r: float | None,
+    alpha: float | None,
+    return_q: Literal[False],
+) -> float: ...
+
+
+@overload
+def migration_threshold(
+    Disk: DiskProfile,
+    AGN: AGN_properties,
+    r: float | None,
+    alpha: float | None,
+    return_q: Literal[True],
 ) -> tuple[float, float, float]: ...
 
 

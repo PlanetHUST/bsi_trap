@@ -25,7 +25,6 @@ from bsi_trap.storage.payload import (
 )
 from bsi_trap.storage.save_gen import save_generation_to_file
 
-
 TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
@@ -69,7 +68,7 @@ def run_physics_sample(
     seed: int | None = None,
 ) -> SampleWorkflowResult:
 
-    # 1. random seed generator
+    # 1. Random seed generator
     master_seed = resolve_seed(seed if seed is not None else model_config.master_seed)
     sample_seed = master_seed if seed is not None else master_seed + sample_index
     rng = make_rng_streams(sample_seed)
@@ -79,7 +78,7 @@ def run_physics_sample(
         f"start: Msmbh={smbh_mass:.3e} Msun",
     )
 
-    # 2. build environment
+    # 2. Build environment
     agn, disk = make_environment(
         model_config=model_config,
         smbh_mass=smbh_mass,
@@ -90,7 +89,7 @@ def run_physics_sample(
         f"disk: rtrap={disk.r_trap_cm:.3e} cm",
     )
 
-    # 3. initialize trap population
+    # 3. Initialize trap population
     population = make_trap_population(
         model_config=model_config,
         agn=agn,

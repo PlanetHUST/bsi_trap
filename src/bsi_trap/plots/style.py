@@ -2,14 +2,24 @@
 
 from __future__ import annotations
 
-from typing import Mapping
+from importlib import import_module
+from typing import Mapping, Protocol, cast
 
 import matplotlib.pyplot as plt
 
-try:
-    import seaborn as sns
-except ModuleNotFoundError:  # pragma: no cover
-    sns = None
+
+class _SeabornStyleModule(Protocol):
+    def set_theme(self, *, style: str, rc: Mapping[str, object]) -> None: ...
+
+
+def _load_seaborn_style() -> _SeabornStyleModule | None:
+    try:
+        return cast(_SeabornStyleModule, import_module("seaborn"))
+    except ModuleNotFoundError:  # pragma: no cover
+        return None
+
+
+sns = _load_seaborn_style()
 
 
 PLOT_RCPARAMS: dict[str, object] = {

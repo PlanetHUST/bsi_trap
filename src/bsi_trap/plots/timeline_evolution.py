@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from matplotlib.typing import ColorType
 import numpy as np
 
 from bsi_trap.constant.constant import Myr, parsec
@@ -132,7 +133,7 @@ def plot_bbh_parameter_timeline(
     plotted_y: list[np.ndarray] = []
     collapsed_x: list[float] = []
     collapsed_y: list[float] = []
-    collapsed_color: list[object] = []
+    collapsed_color: list[ColorType] = []
     final_x: list[float] = []
     final_y: list[float] = []
     final_is_merge: list[bool] = []
