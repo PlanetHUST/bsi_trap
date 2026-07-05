@@ -91,9 +91,9 @@ def _bsi_impact_parameter_cm(
         return 0.0
 
     trap_context = build_trap_context(disk, model_config)
-    hill_radius_cm = disk.r_trap_cm * (
-        binary_mass_msun / (3.0 * agn.M_SMBH_msun)
-    ) ** (1.0 / 3.0)
+    hill_radius_cm = disk.r_trap_cm * (binary_mass_msun / (3.0 * agn.M_SMBH_msun)) ** (
+        1.0 / 3.0
+    )
     return float(
         min(
             bbh_cross_section(model_config, sma_cm),
@@ -208,18 +208,16 @@ def schedule_bsi_events(
     sbh: Single_BH_properties,
     rng: np.random.Generator,
 ) -> np.ndarray:
-    """Schedule reduced BSI events from the live trap-single reservoir.
+    """Schedule reduced BSI delays from the live single-BH reservoir.
 
-    The scheduler writes delays measured from BBH formation into
-    ``bbh.bsi_timescale_s``. Existing finite delays are preserved so focused
-    tests can still drive the integrator. The reduced model applies scheduled
-    BSI events as weak perturbations when they are crossed.
+    Delays are measured from BBH formation and written to
+    ``bbh.bsi_timescale_s``. Existing finite nonnegative delays are preserved so
+    focused tests and deterministic fixtures can force a specific event. The
+    orbital perturbation itself is applied later by ``apply_scheduled_bsi_step``.
     """
     scheduled = np.zeros(bbh.num, dtype=bool)
-    if bbh.num == 0:
-        return scheduled
 
-    if sbh.num == 0:
+    if bbh.num == 0 or sbh.num == 0:
         return scheduled
 
     duty_cycle_s = float(agn.lifetime_myr * Myr)

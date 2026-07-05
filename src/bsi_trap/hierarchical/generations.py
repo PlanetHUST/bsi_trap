@@ -105,34 +105,106 @@ def _concat_int(arrays) -> IntArray:
     return np.concatenate(items)
 
 
-def make_remnant_generation_population(
+def _combine_single_populations(
+    *populations: Single_BH_properties | None,
+) -> Single_BH_properties:
+    """Return one event-time ordered single-BH reservoir."""
+    items = [
+        population
+        for population in populations
+        if population is not None and population.num > 0
+    ]
+    total = sum(population.num for population in items)
+    combined = Single_BH_properties(total)
+    if total == 0:
+        return combined
+
+    offset = 0
+    for population in items:
+        next_offset = offset + population.num
+        combined.m_msun[offset:next_offset] = population.m_msun
+        combined.t_ini_s[offset:next_offset] = population.t_ini_s
+        combined.chi[offset:next_offset] = population.chi
+        combined.theta[offset:next_offset] = population.theta
+        combined.r_pair_cm[offset:next_offset] = population.r_pair_cm
+        offset = next_offset
+
+    order = np.argsort(combined.t_ini_s, kind="stable")
+    combined.m_msun = combined.m_msun[order]
+    combined.t_ini_s = combined.t_ini_s[order]
+    combined.chi = combined.chi[order]
+    combined.theta = combined.theta[order]
+    combined.r_pair_cm = combined.r_pair_cm[order]
+    return combined
+
+
+def _singles_from_embedded_arrivals(
+    embedded_bh: Embedded_BH,
+    end_time_s: float,
+) -> Single_BH_properties:
+    reached_mask = (
+        np.isfinite(embedded_bh.t_reach_s)
+        & (embedded_bh.t_reach_s >= 0.0)
+        & (embedded_bh.t_reach_s < end_time_s)
+        & np.isfinite(embedded_bh.m_msun)
+        & (embedded_bh.m_msun > 0.0)
+    )
+    reached_idx = np.flatnonzero(reached_mask)
+    reached_idx = reached_idx[
+        np.argsort(embedded_bh.t_reach_s[reached_idx], kind="stable")
+    ]
+
+    singles = Single_BH_properties(reached_idx.size)
+    if reached_idx.size == 0:
+        return singles
+
+    singles.m_msun = np.array(embedded_bh.m_msun[reached_idx], copy=True)
+    singles.t_ini_s = np.array(embedded_bh.t_reach_s[reached_idx], copy=True)
+    singles.chi = np.array(embedded_bh.chi[reached_idx], copy=True)
+    singles.theta = np.array(embedded_bh.theta[reached_idx], copy=True)
+    singles.r_pair_cm = np.array(embedded_bh.r_pair_cm[reached_idx], copy=True)
+    return singles
+
+
+def _build_embedded_reservoir(
+    source_singles: Single_BH_properties,
+    disk: DiskProfile,
+) -> Embedded_BH:
+    embedded_bh = Embedded_BH(source_singles.num)
+    embedded_bh.init_ebh(
+        source_singles.m_msun,
+        source_singles.t_ini_s,
+        np.full(source_singles.num, disk.r_trap_cm, dtype=np.float64),
+    )
+    embedded_bh.t_mig_s = np.zeros(source_singles.num, dtype=np.float64)
+    embedded_bh.t_reach_s = np.asarray(source_singles.t_ini_s, dtype=np.float64)
+    embedded_bh.r_trap_target_cm = np.full(
+        source_singles.num,
+        disk.r_trap_cm,
+        dtype=np.float64,
+    )
+    embedded_bh.r_pair_cm = np.array(
+        source_singles.r_pair_cm,
+        dtype=np.float64,
+        copy=True,
+    )
+    embedded_bh.chi = np.array(source_singles.chi, dtype=np.float64, copy=True)
+    embedded_bh.theta = np.array(source_singles.theta, dtype=np.float64, copy=True)
+    return embedded_bh
+
+
+def _build_population_from_single_reservoir(
     *,
-    remnant_singles: Single_BH_properties,
-    generation: int,
+    source_singles: Single_BH_properties,
     model_config: ModelConfig,
     agn: AGN_properties,
     disk: DiskProfile,
     rng_pair_up: np.random.Generator,
     rng_orbit: np.random.Generator,
     rng_spin: np.random.Generator,
+    max_pairing_events: int | None,
 ) -> TrapPopulation:
-    """Build the next trap generation from retained merger remnants."""
-    embedded_bh = Embedded_BH(remnant_singles.num)
-    embedded_bh.init_ebh(
-        remnant_singles.m_msun,
-        remnant_singles.t_ini_s,
-        np.full(remnant_singles.num, disk.r_trap_cm, dtype=np.float64),
-    )
-    embedded_bh.t_mig_s = np.zeros(remnant_singles.num, dtype=np.float64)
-    embedded_bh.t_reach_s = np.asarray(remnant_singles.t_ini_s, dtype=np.float64)
-    embedded_bh.r_trap_target_cm = np.full(
-        remnant_singles.num,
-        disk.r_trap_cm,
-        dtype=np.float64,
-    )
-    embedded_bh.chi = np.asarray(remnant_singles.chi, dtype=np.float64)
-    embedded_bh.theta = np.asarray(remnant_singles.theta, dtype=np.float64)
-
+    embedded_bh = _build_embedded_reservoir(source_singles, disk)
     end_time_s = agn.lifetime_myr * Myr
     reached_mask = np.isfinite(embedded_bh.t_reach_s) & (
         embedded_bh.t_reach_s < end_time_s
@@ -149,6 +221,7 @@ def make_remnant_generation_population(
         smbh_mass_msun=agn.M_SMBH_msun,
         end_time_s=end_time_s,
         rng_pair_up=rng_pair_up,
+        max_events=max_pairing_events,
     )
     binaries = init_bbh(embedded_bh)
     singles = init_sbh(embedded_bh)
@@ -182,15 +255,27 @@ def evolve_hierarchical_generations(
     rng_pair_up: np.random.Generator,
     rng_orbit: np.random.Generator,
     rng_spin: np.random.Generator,
-    max_generations: int,
 ) -> HierarchicalRun:
-    if max_generations < 1:
-        raise ValueError("max_generations must be at least 1")
+    end_time_s = agn.lifetime_myr * Myr
+    live_singles = _singles_from_embedded_arrivals(
+        initial_population.embedded_bh,
+        end_time_s,
+    )
 
     records: list[GenerationRecord] = []
-    population = initial_population
+    event_index = 1
 
-    for generation in range(1, max_generations + 1):
+    while True:
+        population = _build_population_from_single_reservoir(
+            source_singles=live_singles,
+            model_config=model_config,
+            agn=agn,
+            disk=disk,
+            rng_pair_up=rng_pair_up,
+            rng_orbit=rng_orbit,
+            rng_spin=rng_spin,
+            max_pairing_events=1,
+        )
         outcome = make_generation(
             Evolparams=Evolparams,
             model_config=model_config,
@@ -199,36 +284,27 @@ def evolve_hierarchical_generations(
             bbh=population.binaries,
             sbh=population.singles,
             rng_orbit=rng_orbit,
-            rng_spin=rng_spin,
         )
-        records.append(
-            GenerationRecord(
-                generation=generation,
-                population=population,
-                outcome=outcome,
-            )
+        record = GenerationRecord(
+            generation=event_index,
+            population=population,
+            outcome=outcome,
         )
 
-        if generation == max_generations:
+        if population.binaries.num == 0:
+            if not records:
+                records.append(record)
             break
 
-        remnant_singles = outcome.hierarchical_mergers.next_generation_singles
-        if remnant_singles.num < 2:
-            break
+        records.append(record)
 
-        next_population = make_remnant_generation_population(
-            remnant_singles=remnant_singles,
-            generation=generation + 1,
-            model_config=model_config,
-            agn=agn,
-            disk=disk,
-            rng_pair_up=rng_pair_up,
-            rng_orbit=rng_orbit,
-            rng_spin=rng_spin,
+        live_singles = _combine_single_populations(
+            population.singles,
+            outcome.hierarchical_mergers.next_generation_singles,
         )
-        if next_population.binaries.num == 0:
+        if live_singles.num < 2:
             break
 
-        population = next_population
+        event_index += 1
 
     return HierarchicalRun(records=tuple(records))

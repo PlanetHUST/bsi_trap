@@ -84,16 +84,9 @@ def make_generation(
     bbh: BBH_properties,
     sbh: Single_BH_properties,
     rng_orbit: np.random.Generator,
-    rng_spin: np.random.Generator,
 ) -> GenerationEvolutionResult:
-    """Evolve the current first-generation BBH population.
+    """Evolve one committed BBH population and package its event ledgers."""
 
-    This stage mutates ``bbh`` in place: gas/GW evolution changes orbital
-    parameters, and scheduled BSI events may perturb or stop binaries.  The
-    returned outcome records both the evolution timeline and the post-merger
-    hierarchical-remnant ledger.
-    """
-    num = bbh.num
     if model_config.bsi_enabled:
         schedule_bsi_events(
             model_config=model_config,
@@ -104,9 +97,10 @@ def make_generation(
             rng=rng_orbit,
         )
 
-    for i in range(num):
+    for i in range(bbh.num):
         t_del_s = evolve_single_binary(Evolparams, model_config, agn, disk, bbh, i)
         bbh.t_del_s[i] = t_del_s
+
     finalize_bbh_tracks(bbh)
 
     bsi_timeline = construct_bsi_timeline(bbh)

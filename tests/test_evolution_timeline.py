@@ -37,7 +37,6 @@ from bsi_trap.evolve.timeline import BSI_Timeline, EvolutionTimeline, PairingTim
 from bsi_trap.evolve.tracks import append_bbh_track, finalize_bbh_tracks
 from bsi_trap.hierarchical.generations import (
     evolve_hierarchical_generations,
-    make_remnant_generation_population,
 )
 from bsi_trap.hierarchical.remnants import HierarchicalMergerLedger
 from bsi_trap.initialization.trap_population import TrapPopulation
@@ -242,7 +241,6 @@ class TestEvolutionTimeline(TestCase):
                 bbh,
                 sbh,
                 rng_orbit=np.random.default_rng(1),
-                rng_spin=np.random.default_rng(2),
             )
 
         timeline = outcome.evolution_timeline
@@ -266,7 +264,6 @@ class TestEvolutionTimeline(TestCase):
             BBH_properties(0),
             Single_BH_properties(0),
             rng_orbit=np.random.default_rng(1),
-            rng_spin=np.random.default_rng(2),
         )
 
         self.assertEqual(outcome.evolution_timeline.size, 0)
@@ -460,7 +457,6 @@ class TestEvolutionProcess(TestCase):
             bbh,
             Single_BH_properties(0),
             rng_orbit=np.random.default_rng(1),
-            rng_spin=np.random.default_rng(2),
         )
         timeline = outcome.evolution_timeline
 
@@ -492,7 +488,6 @@ class TestEvolutionProcess(TestCase):
             bbh,
             Single_BH_properties(0),
             rng_orbit=np.random.default_rng(1),
-            rng_spin=np.random.default_rng(2),
         )
         timeline = outcome.evolution_timeline
 
@@ -526,7 +521,6 @@ class TestEvolutionProcess(TestCase):
             bbh,
             Single_BH_properties(0),
             rng_orbit=np.random.default_rng(1),
-            rng_spin=np.random.default_rng(2),
         )
 
         self.assertEqual(bbh.flags.bsi_event_flag[0], 1)
@@ -553,7 +547,6 @@ class TestEvolutionProcess(TestCase):
             bbh,
             sbh,
             rng_orbit=np.random.default_rng(1),
-            rng_spin=np.random.default_rng(2),
         )
 
         self.assertTrue(np.isfinite(bbh.bsi_timescale_s[0]))
@@ -579,7 +572,6 @@ class TestEvolutionProcess(TestCase):
             bbh,
             Single_BH_properties(0),
             rng_orbit=np.random.default_rng(1),
-            rng_spin=np.random.default_rng(2),
         )
 
         self.assertEqual(bbh.flags.bsi_event_flag[0], 1)
@@ -614,7 +606,6 @@ class TestEvolutionProcess(TestCase):
             bbh,
             Single_BH_properties(0),
             rng_orbit=np.random.default_rng(1),
-            rng_spin=np.random.default_rng(2),
         )
 
         duty_cycle_s = agn.lifetime_myr * const.Myr
@@ -637,7 +628,6 @@ class TestEvolutionProcess(TestCase):
             bbh,
             Single_BH_properties(0),
             rng_orbit=np.random.default_rng(1),
-            rng_spin=np.random.default_rng(2),
         )
 
         duty_cycle_s = agn.lifetime_myr * const.Myr
@@ -663,7 +653,6 @@ class TestEvolutionProcess(TestCase):
             bbh,
             Single_BH_properties(0),
             rng_orbit=np.random.default_rng(1),
-            rng_spin=np.random.default_rng(2),
         )
         timeline = outcome.evolution_timeline
 
@@ -687,7 +676,6 @@ class TestEvolutionProcess(TestCase):
             bbh,
             Single_BH_properties(0),
             rng_orbit=np.random.default_rng(1),
-            rng_spin=np.random.default_rng(2),
         )
 
         self.assertEqual(bbh.t_del_s[0], 0.0)
@@ -713,7 +701,6 @@ class TestEvolutionProcess(TestCase):
             bbh,
             Single_BH_properties(0),
             rng_orbit=np.random.default_rng(1),
-            rng_spin=np.random.default_rng(2),
         )
 
         self.assertGreater(bbh.t_del_s[0], 0.0)
@@ -746,7 +733,6 @@ class TestEvolutionProcess(TestCase):
                 bbh,
                 Single_BH_properties(0),
                 rng_orbit=np.random.default_rng(1),
-                rng_spin=np.random.default_rng(2),
             )
 
         self.assertEqual(outcome.hierarchical_mergers.size, 1)
@@ -765,194 +751,54 @@ class TestEvolutionProcess(TestCase):
 
 
 class TestHierarchicalGenerationLoop(TestCase):
-    def _population(self, binary_count: int) -> TrapPopulation:
-        bbh = BBH_properties(binary_count)
-        bbh.m1_msun[:] = 30.0
-        bbh.m2_msun[:] = 20.0
-        bbh.t_ini_s[:] = np.arange(binary_count, dtype=float)
+    def _embedded_population(
+        self,
+        masses_msun: list[float],
+        reach_times_s: list[float],
+    ) -> TrapPopulation:
+        embedded_bh = Embedded_BH(len(masses_msun))
+        embedded_bh.init_ebh(
+            masses_msun,
+            np.zeros(len(masses_msun), dtype=float),
+            np.full(len(masses_msun), 1.0e16, dtype=float),
+        )
+        embedded_bh.t_reach_s[:] = reach_times_s
+        embedded_bh.r_trap_target_cm[:] = 1.0e16
+        embedded_bh.r_pair_cm[:] = 1.0e16
         return TrapPopulation(
-            embedded_bh=Embedded_BH(0),
-            binaries=bbh,
+            embedded_bh=embedded_bh,
+            binaries=BBH_properties(0),
             singles=Single_BH_properties(0),
             pairing_timeline=PairingTimeline.empty(),
         )
 
-    def test_loop_evolves_second_generation_from_retained_remnants(self) -> None:
-        first_population = self._population(2)
-        second_population = self._population(1)
-        first_population.binaries.flags.merger_flag[:] = [1, 1]
-        second_population.binaries.flags.merger_flag[:] = [1]
-
-        remnant_singles = Single_BH_properties(2)
-        remnant_singles.m_msun[:] = [45.0, 38.0]
-        remnant_singles.t_ini_s[:] = [10.0, 11.0]
-        remnant_singles.chi[:] = [0.7, 0.6]
-        remnant_singles.theta[:] = [0.0, 0.0]
-
-        first_timeline = EvolutionTimeline(
-            binary_idx=np.array([0, 1], dtype=np.intp),
-            start_s=np.array([0.0, 1.0]),
-            delay_s=np.array([10.0, 10.0]),
-            end_s=np.array([10.0, 11.0]),
-            merger_s=np.array([10.0, 11.0]),
-            merged=np.array([True, True]),
-            stop_reason=np.array([0, 0], dtype=np.int64),
-            bsi_timeline=BSI_Timeline.empty(),
+    def test_global_event_loop_recomputes_pairing_after_remnant_arrival(
+        self,
+    ) -> None:
+        initial_population = self._embedded_population(
+            masses_msun=[30.0, 20.0, 10.0],
+            reach_times_s=[0.0, 0.0, 0.0],
         )
-        first_ledger = HierarchicalMergerLedger(
-            source_binary_idx=np.array([0, 1], dtype=np.intp),
-            merger_s=np.array([10.0, 11.0]),
-            remnant_mass_msun=np.array([45.0, 38.0]),
-            remnant_spin=np.array([0.7, 0.6]),
-            kick_velocity_cgs=np.array([1.0e6, 1.1e6]),
-            outer_semimajor_cm=np.array([1.0e12, 1.0e12]),
-            retained=np.array([True, True]),
-            escaped=np.array([False, False]),
-            trap_overloaded=np.array([False, False]),
-            next_generation_singles=remnant_singles,
-        )
-
-        second_timeline = EvolutionTimeline(
-            binary_idx=np.array([0], dtype=np.intp),
-            start_s=np.array([20.0]),
-            delay_s=np.array([5.0]),
-            end_s=np.array([25.0]),
-            merger_s=np.array([25.0]),
-            merged=np.array([True]),
-            stop_reason=np.array([0], dtype=np.int64),
-            bsi_timeline=BSI_Timeline.empty(),
-        )
-
-        with (
-            mock.patch(
-                "bsi_trap.hierarchical.generations.make_generation",
-                side_effect=[
-                    gen_evolve.GenerationEvolutionResult(first_timeline, first_ledger),
-                    gen_evolve.GenerationEvolutionResult(
-                        second_timeline,
-                        HierarchicalMergerLedger.empty(),
-                    ),
-                ],
-            ),
-            mock.patch(
-                "bsi_trap.hierarchical.generations.make_remnant_generation_population",
-                return_value=second_population,
-            ) as next_population_mock,
-        ):
-            run = evolve_hierarchical_generations(
-                Evolparams=BBHEvolverParams(
-                    rlist=np.array([1.0]),
-                    sigmalist=np.array([1.0]),
-                    hlist=np.array([0.1]),
-                    cslist=np.array([1.0]),
-                ),
-                model_config=ModelConfig(model_name="loop-test", max_generations=4),
-                agn=AGN_properties(M_SMBH_msun=1.0e6, lifetime_myr=10.0),
-                disk=_disk(),
-                initial_population=first_population,
-                rng_pair_up=np.random.default_rng(1),
-                rng_orbit=np.random.default_rng(2),
-                rng_spin=np.random.default_rng(3),
-                max_generations=4,
-            )
-
-        self.assertEqual(run.generation_count, 2)
-        self.assertEqual(run.evolved_binary_count, 3)
-        self.assertEqual(run.merger_count, 3)
-        np.testing.assert_allclose(run.merger_event_s, [10.0, 11.0, 25.0])
-        np.testing.assert_allclose(run.remnant_event_s, [10.0, 11.0])
-        np.testing.assert_array_equal(run.merger_generation, [1, 1, 2])
-        self.assertIs(
-            next_population_mock.call_args.kwargs["remnant_singles"],
-            remnant_singles,
-        )
-
-    def test_loop_respects_generation_cap_before_recycling_remnants(self) -> None:
-        first_population = self._population(2)
-        first_population.binaries.flags.merger_flag[:] = [1, 1]
-
-        remnant_singles = Single_BH_properties(2)
-        remnant_singles.m_msun[:] = [45.0, 38.0]
-        remnant_singles.t_ini_s[:] = [10.0, 11.0]
-
-        first_timeline = EvolutionTimeline(
-            binary_idx=np.array([0, 1], dtype=np.intp),
-            start_s=np.array([0.0, 1.0]),
-            delay_s=np.array([10.0, 10.0]),
-            end_s=np.array([10.0, 11.0]),
-            merger_s=np.array([10.0, 11.0]),
-            merged=np.array([True, True]),
-            stop_reason=np.array([0, 0], dtype=np.int64),
-            bsi_timeline=BSI_Timeline.empty(),
-        )
-        first_ledger = HierarchicalMergerLedger(
-            source_binary_idx=np.array([0, 1], dtype=np.intp),
-            merger_s=np.array([10.0, 11.0]),
-            remnant_mass_msun=np.array([45.0, 38.0]),
-            remnant_spin=np.array([0.7, 0.6]),
-            kick_velocity_cgs=np.array([1.0e6, 1.1e6]),
-            outer_semimajor_cm=np.array([1.0e12, 1.0e12]),
-            retained=np.array([True, True]),
-            escaped=np.array([False, False]),
-            trap_overloaded=np.array([False, False]),
-            next_generation_singles=remnant_singles,
-        )
-
-        with (
-            mock.patch(
-                "bsi_trap.hierarchical.generations.make_generation",
-                return_value=gen_evolve.GenerationEvolutionResult(
-                    first_timeline,
-                    first_ledger,
-                ),
-            ),
-            mock.patch(
-                "bsi_trap.hierarchical.generations.make_remnant_generation_population"
-            ) as next_population_mock,
-        ):
-            run = evolve_hierarchical_generations(
-                Evolparams=BBHEvolverParams(
-                    rlist=np.array([1.0]),
-                    sigmalist=np.array([1.0]),
-                    hlist=np.array([0.1]),
-                    cslist=np.array([1.0]),
-                ),
-                model_config=ModelConfig(model_name="cap-test", max_generations=1),
-                agn=AGN_properties(M_SMBH_msun=1.0e6, lifetime_myr=10.0),
-                disk=_disk(),
-                initial_population=first_population,
-                rng_pair_up=np.random.default_rng(1),
-                rng_orbit=np.random.default_rng(2),
-                rng_spin=np.random.default_rng(3),
-                max_generations=1,
-            )
-
-        self.assertEqual(run.generation_count, 1)
-        self.assertEqual(run.evolved_binary_count, 2)
-        np.testing.assert_allclose(run.merger_event_s, [10.0, 11.0])
-        next_population_mock.assert_not_called()
-
-    def test_loop_stops_when_fewer_than_two_remnants_are_retained(self) -> None:
-        first_population = self._population(1)
-        first_population.binaries.flags.merger_flag[:] = [1]
 
         remnant_singles = Single_BH_properties(1)
         remnant_singles.m_msun[:] = [45.0]
-        remnant_singles.t_ini_s[:] = [10.0]
+        remnant_singles.t_ini_s[:] = [5.0]
+        remnant_singles.chi[:] = [0.7]
+        remnant_singles.theta[:] = [0.0]
 
         first_timeline = EvolutionTimeline(
             binary_idx=np.array([0], dtype=np.intp),
-            start_s=np.array([0.0]),
-            delay_s=np.array([10.0]),
-            end_s=np.array([10.0]),
-            merger_s=np.array([10.0]),
+            start_s=np.array([1.0]),
+            delay_s=np.array([4.0]),
+            end_s=np.array([5.0]),
+            merger_s=np.array([5.0]),
             merged=np.array([True]),
             stop_reason=np.array([0], dtype=np.int64),
             bsi_timeline=BSI_Timeline.empty(),
         )
         first_ledger = HierarchicalMergerLedger(
             source_binary_idx=np.array([0], dtype=np.intp),
-            merger_s=np.array([10.0]),
+            merger_s=np.array([5.0]),
             remnant_mass_msun=np.array([45.0]),
             remnant_spin=np.array([0.7]),
             kick_velocity_cgs=np.array([1.0e6]),
@@ -962,18 +808,62 @@ class TestHierarchicalGenerationLoop(TestCase):
             trap_overloaded=np.array([False]),
             next_generation_singles=remnant_singles,
         )
+        second_timeline = EvolutionTimeline(
+            binary_idx=np.array([0], dtype=np.intp),
+            start_s=np.array([6.0]),
+            delay_s=np.array([2.0]),
+            end_s=np.array([8.0]),
+            merger_s=np.array([np.nan]),
+            merged=np.array([False]),
+            stop_reason=np.array([0], dtype=np.int64),
+            bsi_timeline=BSI_Timeline.empty(),
+        )
+
+        pairing_inputs: list[np.ndarray] = []
+
+        def fake_pairing(embedded_bh, *args, max_events=None, **kwargs):
+            pairing_inputs.append(np.array(embedded_bh.m_msun, copy=True))
+            self.assertEqual(max_events, 1)
+            if len(pairing_inputs) == 1:
+                embedded_bh.trap_flag[:] = [1, 0, -2]
+                embedded_bh.t_pair_s[:] = [1.0, 1.0, np.nan]
+                return PairingTimeline(
+                    first_idx=np.array([0], dtype=np.intp),
+                    second_idx=np.array([1], dtype=np.intp),
+                    later_arrival_s=np.array([0.0]),
+                    encounter_s=np.array([0.5]),
+                    pair_delay_s=np.array([0.5]),
+                    formation_s=np.array([1.0]),
+                )
+            embedded_bh.trap_flag[:] = [1, 0]
+            embedded_bh.t_pair_s[:] = [6.0, 6.0]
+            return PairingTimeline(
+                first_idx=np.array([0], dtype=np.intp),
+                second_idx=np.array([1], dtype=np.intp),
+                later_arrival_s=np.array([5.0]),
+                encounter_s=np.array([5.5]),
+                pair_delay_s=np.array([0.5]),
+                formation_s=np.array([6.0]),
+            )
 
         with (
             mock.patch(
-                "bsi_trap.hierarchical.generations.make_generation",
-                return_value=gen_evolve.GenerationEvolutionResult(
-                    first_timeline,
-                    first_ledger,
-                ),
-            ),
+                "bsi_trap.hierarchical.generations.construct_pairing_up_timeline",
+                side_effect=fake_pairing,
+            ) as pairing_mock,
             mock.patch(
-                "bsi_trap.hierarchical.generations.make_remnant_generation_population"
-            ) as next_population_mock,
+                "bsi_trap.hierarchical.generations.make_generation",
+                side_effect=[
+                    gen_evolve.GenerationEvolutionResult(
+                        first_timeline,
+                        first_ledger,
+                    ),
+                    gen_evolve.GenerationEvolutionResult(
+                        second_timeline,
+                        HierarchicalMergerLedger.empty(),
+                    ),
+                ],
+            ) as generation_mock,
         ):
             run = evolve_hierarchical_generations(
                 Evolparams=BBHEvolverParams(
@@ -982,67 +872,49 @@ class TestHierarchicalGenerationLoop(TestCase):
                     hlist=np.array([0.1]),
                     cslist=np.array([1.0]),
                 ),
-                model_config=ModelConfig(model_name="single-remnant-test"),
-                agn=AGN_properties(M_SMBH_msun=1.0e6, lifetime_myr=10.0),
-                disk=_disk(),
-                initial_population=first_population,
-                rng_pair_up=np.random.default_rng(1),
-                rng_orbit=np.random.default_rng(2),
-                rng_spin=np.random.default_rng(3),
-                max_generations=4,
-            )
-
-        self.assertEqual(run.generation_count, 1)
-        self.assertEqual(run.evolved_binary_count, 1)
-        np.testing.assert_allclose(run.remnant_event_s, [10.0])
-        next_population_mock.assert_not_called()
-
-    def test_remnant_generation_population_preserves_remnant_spins(self) -> None:
-        remnant_singles = Single_BH_properties(2)
-        remnant_singles.m_msun[:] = [50.0, 30.0]
-        remnant_singles.t_ini_s[:] = [10.0, 12.0]
-        remnant_singles.chi[:] = [0.8, 0.4]
-        remnant_singles.theta[:] = [0.0, np.pi]
-
-        def fake_pairing(embedded_bh, *args, **kwargs):
-            embedded_bh.trap_flag[:] = [1, 0]
-            embedded_bh.t_pair_s[:] = [15.0, 15.0]
-            return PairingTimeline(
-                first_idx=np.array([0], dtype=np.intp),
-                second_idx=np.array([1], dtype=np.intp),
-                later_arrival_s=np.array([12.0]),
-                encounter_s=np.array([14.0]),
-                pair_delay_s=np.array([1.0]),
-                formation_s=np.array([15.0]),
-            )
-
-        with mock.patch(
-            "bsi_trap.hierarchical.generations.construct_pairing_up_timeline",
-            side_effect=fake_pairing,
-        ):
-            population = make_remnant_generation_population(
-                remnant_singles=remnant_singles,
-                generation=2,
-                model_config=ModelConfig(model_name="spin-carry-test"),
+                model_config=ModelConfig(model_name="global-event-test"),
                 agn=AGN_properties(M_SMBH_msun=1.0e6, lifetime_myr=10.0),
                 disk=_wide_disk(),
+                initial_population=initial_population,
                 rng_pair_up=np.random.default_rng(1),
                 rng_orbit=np.random.default_rng(2),
                 rng_spin=np.random.default_rng(3),
             )
 
-        self.assertEqual(population.binaries.num, 1)
-        np.testing.assert_allclose(population.binaries.m1_msun, [50.0])
-        np.testing.assert_allclose(population.binaries.m2_msun, [30.0])
-        np.testing.assert_allclose(population.binaries.t_ini_s, [15.0])
-        np.testing.assert_allclose(population.pairing_timeline.later_arrival_s, [12.0])
-        np.testing.assert_allclose(population.pairing_timeline.formation_s, [15.0])
-        np.testing.assert_allclose(population.embedded_bh.t_pair_s, [15.0, 15.0])
-        self.assertEqual(population.singles.num, 0)
-        np.testing.assert_allclose(population.binaries.chi1, [0.8])
-        np.testing.assert_allclose(population.binaries.chi2, [0.4])
-        np.testing.assert_allclose(population.binaries.th1, [0.0])
-        np.testing.assert_allclose(population.binaries.th2, [np.pi])
+        self.assertEqual(run.generation_count, 2)
+        self.assertEqual(pairing_mock.call_count, 2)
+        np.testing.assert_allclose(run.pairing_event_s, [1.0, 6.0])
+        np.testing.assert_allclose(pairing_inputs[0], [30.0, 20.0, 10.0])
+        np.testing.assert_allclose(pairing_inputs[1], [10.0, 45.0])
+        second_bbh = generation_mock.call_args_list[1].kwargs["bbh"]
+        np.testing.assert_allclose(second_bbh.m1_msun, [45.0])
+        np.testing.assert_allclose(second_bbh.m2_msun, [10.0])
+
+    def test_global_event_loop_records_empty_state_when_no_pair_forms(self) -> None:
+        run = evolve_hierarchical_generations(
+            Evolparams=BBHEvolverParams(
+                rlist=np.array([1.0]),
+                sigmalist=np.array([1.0]),
+                hlist=np.array([0.1]),
+                cslist=np.array([1.0]),
+            ),
+            model_config=ModelConfig(model_name="empty-event-test"),
+            agn=AGN_properties(M_SMBH_msun=1.0e6, lifetime_myr=10.0),
+            disk=_wide_disk(),
+            initial_population=self._embedded_population(
+                masses_msun=[30.0],
+                reach_times_s=[0.0],
+            ),
+            rng_pair_up=np.random.default_rng(1),
+            rng_orbit=np.random.default_rng(2),
+            rng_spin=np.random.default_rng(3),
+        )
+
+        self.assertEqual(run.generation_count, 1)
+        self.assertEqual(run.evolved_binary_count, 0)
+        self.assertEqual(run.final_record.population.binaries.num, 0)
+        self.assertEqual(run.final_record.population.singles.num, 1)
+        self.assertEqual(run.pairing_event_s.size, 0)
 
 
 if __name__ == "__main__":

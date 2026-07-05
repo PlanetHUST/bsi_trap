@@ -1,4 +1,5 @@
-# gas_harden.py, contains gas-hardening evolution functions
+"""Gas-assisted BBH hardening and its wrapper around the shared orbit loop."""
+
 import numpy as np
 
 from bsi_trap.evolve.gw import ode_gw_only
@@ -7,21 +8,19 @@ from bsi_trap.classes.models import (
     BBH_properties,
     DiskProfile,
     AGN_properties,
-    BBH_flags,
 )
 from bsi_trap.evolve.numeric import (
     safe_sma,
     safe_eccentricity,
     is_physical_state,
-    para_evo,
 )
 
 import bsi_trap.constant.constant as const
-from bsi_trap.constant.stop_reason import StopReasons
-from bsi_trap.evolve import bsi
+from bsi_trap.evolve.binary_evolution import (
+    BinaryEvolutionState,
+    evolve_binary_orbit,
+)
 from bsi_trap.evolve import physical_quantity as pq
-from bsi_trap.evolve import stop_conditions as stop_cond
-from bsi_trap.evolve.tracks import DecimatedTrackRecorder, append_bbh_track
 
 
 def ode_with_gas(
@@ -30,10 +29,9 @@ def ode_with_gas(
     m2_g: float,
     a_cm: float,
     e: float,
-    AGN: AGN_properties,
-    Disk: DiskProfile,
+    agn: AGN_properties,
+    disk: DiskProfile,
 ) -> tuple[float, float]:
-
     a_cm = safe_sma(Evolparams, a_cm)
     e = safe_eccentricity(Evolparams, e)
     if not is_physical_state(Evolparams, a_cm, e):
@@ -46,10 +44,10 @@ def ode_with_gas(
     # Effective eccentricity for de/dt to avoid singularity at e=1
     e_eff = max(e, Evolparams.ecc_floor)
 
-    alpha = AGN.alpha
-    r_trap_cm = Disk.r_trap_cm
-    cs_cgs = Disk.get_cs(r_trap_cm)
-    sig_trap_cgs = Disk.get_sigma(r_trap_cm)
+    alpha = agn.alpha
+    r_trap_cm = disk.r_trap_cm
+    cs_cgs = disk.get_cs(r_trap_cm)
+    sig_trap_cgs = disk.get_sigma(r_trap_cm)
     # Gas hardening terms based on Ishibashi & Grobner 2020
     da_dt_gas = (
         -24
@@ -119,11 +117,7 @@ def _gas_hardening_time_estimate_s(
     if not np.isfinite(coeff) or coeff <= 0.0:
         return np.inf
 
-    return float(
-        2.0
-        / (3.0 * coeff)
-        * (merger_radius_cm ** -1.5 - a_cm ** -1.5)
-    )
+    return float(2.0 / (3.0 * coeff) * (merger_radius_cm**-1.5 - a_cm**-1.5))
 
 
 def _combined_merger_time_estimate_s(
@@ -185,330 +179,34 @@ def evolve_gas(
     *,
     bsi_enabled: bool = False,
 ) -> float:
-    """
-    Evolve one binary through the gas hardening phase until merger or stop condition is met.
-    return t_del_s
-    binary dynamics parameter and flags updates without return
-    """
-
-    flags = bbh.flags
+    """Evolve one BBH with gas plus GW hardening and return elapsed time."""
     t_ini_s = float(bbh.t_ini_s[i])
 
-    m1_g = bbh.m1_msun[i] * const.msun
-    m2_g = bbh.m2_msun[i] * const.msun
-    a_cm = bbh.sma_cm[i]
-    e = bbh.ecc[i]
-
-    freq_gw = pq.frequency_from_sma(m1_g, m2_g, a_cm)
-
-    duty_cycle_s = agn.lifetime_myr * const.Myr
-
-    # Time limits
-    t_hubble_s = const.tHubble * const.Myr
-    time_limit_s = min(duty_cycle_s, t_hubble_s)
-    time_limit_reason = (
-        const.STOP_HUBBLE_LIMIT
-        if t_hubble_s <= duty_cycle_s
-        else StopReasons.STOP_AGN_LIFETIME
-    )
-    t_est_s = pq.compute_merger_time_estimate(m1_g, m2_g, a_cm, e)
-
-    # Initialize
-    r_th = pq.threshold_radius(m1_g, m2_g)
-    merger_radius_cm = Evolparams.merger_radius_factor * r_th
-
-    h = Evolparams.gas_initial_step_fraction * t_est_s
-
-    t_delay_s = 0.0
-    ecc10 = 0.0
-    ecc0p1 = 0.0
-    track_recorder = DecimatedTrackRecorder(
-        start_time_s=t_ini_s,
-        start_sma_cm=a_cm,
-        start_ecc=e,
-        stop_time_s=time_limit_s,
-        max_smooth_points=Evolparams.track_max_smooth_points,
-    )
-
-    # Evolution loop
-    reached_10hz = False
-    reached_0p1hz = False
-    loop_num = 0
-    max_loops = Evolparams.max_evolution_loops
-    if freq_gw >= Evolparams.eccentricity_probe_low_hz:
-        ecc0p1 = float(e)
-        reached_0p1hz = True
-    if freq_gw >= Evolparams.eccentricity_probe_high_hz:
-        ecc10 = float(e)
-        reached_10hz = True
-
-    while (
-        (a_cm - r_th) / r_th > Evolparams.merger_boundary_fraction
-        and loop_num < max_loops
-    ):
-        if stop_cond._stop_for_walltime(flags, i):
-            break
-
-        remaining_time_s = time_limit_s - (t_ini_s + t_delay_s)
-        if remaining_time_s <= 0.0:
-            flags.continue_ng_flag[i] = 0
-            flags.merger_flag[i] = 0
-            flags.stop_reason_flag[i] = time_limit_reason
-            break
-
-        smooth_step_limit_s = remaining_time_s
-        bsi_event_before_limit = False
-        bsi_active = (
-            bsi_enabled
-            and bbh.bsi_applied_flag[i] == 0
-            and t_delay_s + t_ini_s <= duty_cycle_s
-        )
-        if bsi_active:
-            bsi_delay_s = float(bbh.bsi_timescale_s[i])
-            if np.isfinite(bsi_delay_s) and bsi_delay_s >= t_delay_s:
-                time_to_bsi_s = bsi_delay_s - t_delay_s
-                if time_to_bsi_s <= 0.0:
-                    was_applied = bbh.bsi_applied_flag[i]
-                    a_cm, e, m1_g, m2_g, bsi_stop_reason = (
-                        bsi.apply_scheduled_bsi_step(
-                            Evolparams,
-                            bbh,
-                            flags,
-                            i,
-                            a_cm,
-                            e,
-                            m1_g,
-                            m2_g,
-                            t_delay_s,
-                            0.0,
-                            bsi_active=True,
-                        )
-                    )
-                    if bbh.bsi_applied_flag[i] != was_applied:
-                        track_recorder.record(
-                            t_ini_s + t_delay_s,
-                            a_cm,
-                            e,
-                            force=True,
-                        )
-                    if bsi_stop_reason is not None:
-                        flags.merger_flag[i] = 0
-                        flags.continue_ng_flag[i] = 0
-                        flags.stop_reason_flag[i] = bsi_stop_reason
-                        break
-                else:
-                    smooth_step_limit_s = min(smooth_step_limit_s, time_to_bsi_s)
-                    bsi_event_before_limit = time_to_bsi_s <= remaining_time_s
-
-        if not bsi_event_before_limit:
-            can_merge_before_limit = _can_reach_merger_before_time_limit(
-                disk,
-                agn,
-                m1_g,
-                m2_g,
-                a_cm,
-                e,
-                merger_radius_cm,
-                remaining_time_s,
-            )
-            # Physical non-merger guard: when even the fastest local gas/GW
-            # estimate is longer than the remaining AGN/Hubble window, advancing
-            # millions of tiny RK steps cannot change the merger outcome. Do
-            # not apply it before a scheduled BSI event because that discrete
-            # perturbation can reset the local merger-time estimate.
-            if not can_merge_before_limit:
-                t_delay_s = max(time_limit_s - t_ini_s, 0.0)
-                flags.continue_ng_flag[i] = 0
-                flags.merger_flag[i] = 0
-                flags.stop_reason_flag[i] = time_limit_reason
-                track_recorder.record(t_ini_s + t_delay_s, a_cm, e, force=True)
-                break
-
-        freq_gw = pq.frequency_from_sma(m1_g, m2_g, a_cm)
-        loop_num += 1
-
-        if not reached_0p1hz and freq_gw >= Evolparams.eccentricity_probe_low_hz:
-            ecc0p1 = float(e)
-            reached_0p1hz = True
-        if not reached_10hz and freq_gw >= Evolparams.eccentricity_probe_high_hz:
-            ecc10 = float(e)
-            reached_10hz = True
-
-        flags.continue_ng_flag[i] = 1
-
-        def record_smooth_state(elapsed_s, sma_cm, eccentricity):
-            track_recorder.record(
-                t_ini_s + t_delay_s + elapsed_s,
-                sma_cm,
-                eccentricity,
-            )
-
-        previous_a_cm = a_cm
-        previous_e = e
-
-        # Evolve with gas hardening while the AGN disk is active.
-        a_new, e_new, h = para_evo(
-            Evolparams,
-            m1_g,
-            m2_g,
-            a_cm,
-            e,
-            h,
-            ode_with_gas,
-            agn,
+    def can_merge_before_limit(
+        state: BinaryEvolutionState,
+        merger_radius_cm: float,
+        remaining_time_s: float,
+    ) -> bool:
+        return _can_reach_merger_before_time_limit(
             disk,
-            max_step_s=smooth_step_limit_s,
-            state_callback=record_smooth_state,
+            agn,
+            state.m1_g,
+            state.m2_g,
+            state.sma_cm,
+            state.ecc,
+            merger_radius_cm,
+            remaining_time_s,
         )
 
-        if not (
-            is_physical_state(Evolparams, a_new, e_new) and np.isfinite(h) and h > 0.0
-        ):
-            stop_cond.stop_for_invalid_step(flags, i)
-            break
-
-        if not reached_0p1hz:
-            eccentricity_at_0p1 = pq.compute_eccentricity_at_frequency(
-                m1_g,
-                m2_g,
-                a_new,
-                e_new,
-                target_freq=Evolparams.eccentricity_probe_low_hz,
-                previous_a=previous_a_cm,
-                previous_e=previous_e,
-            )
-            if np.isfinite(eccentricity_at_0p1):
-                ecc0p1 = eccentricity_at_0p1
-                reached_0p1hz = True
-
-        if not reached_10hz:
-            eccentricity_at_10 = pq.compute_eccentricity_at_frequency(
-                m1_g,
-                m2_g,
-                a_new,
-                e_new,
-                target_freq=Evolparams.eccentricity_probe_high_hz,
-                previous_a=previous_a_cm,
-                previous_e=previous_e,
-            )
-            if np.isfinite(eccentricity_at_10):
-                ecc10 = eccentricity_at_10
-                reached_10hz = True
-
-        a_cm, e = a_new, e_new
-
-        # BSI is a discrete update on top of the smooth gas/GW step.  The
-        # timeline is built later from the flags and delay; the physical
-        # perturbation belongs here while the local orbital state is current.
-        was_applied = bbh.bsi_applied_flag[i]
-        bsi_active = (
-            bsi_enabled
-            and was_applied == 0
-            and t_delay_s + t_ini_s <= duty_cycle_s
-        )
-        previous_a_cm = a_cm
-        previous_e = e
-        a_cm, e, m1_g, m2_g, bsi_stop_reason = bsi.apply_scheduled_bsi_step(
-            Evolparams,
-            bbh,
-            flags,
-            i,
-            a_cm,
-            e,
-            m1_g,
-            m2_g,
-            t_delay_s,
-            h,
-            bsi_active=bsi_active,
-        )
-        if bbh.bsi_applied_flag[i] != was_applied:
-            track_recorder.record(
-                t_ini_s + bbh.bsi_timescale_s[i],
-                a_cm,
-                e,
-                force=True,
-            )
-            if not reached_0p1hz:
-                eccentricity_at_0p1 = pq.compute_eccentricity_at_frequency(
-                    m1_g,
-                    m2_g,
-                    a_cm,
-                    e,
-                    target_freq=Evolparams.eccentricity_probe_low_hz,
-                    previous_a=previous_a_cm,
-                    previous_e=previous_e,
-                )
-                if np.isfinite(eccentricity_at_0p1):
-                    ecc0p1 = eccentricity_at_0p1
-                    reached_0p1hz = True
-            if not reached_10hz:
-                eccentricity_at_10 = pq.compute_eccentricity_at_frequency(
-                    m1_g,
-                    m2_g,
-                    a_cm,
-                    e,
-                    target_freq=Evolparams.eccentricity_probe_high_hz,
-                    previous_a=previous_a_cm,
-                    previous_e=previous_e,
-                )
-                if np.isfinite(eccentricity_at_10):
-                    ecc10 = eccentricity_at_10
-                    reached_10hz = True
-
-        if bsi_stop_reason is not None:
-            flags.merger_flag[i] = 0
-            flags.continue_ng_flag[i] = 0
-            flags.stop_reason_flag[i] = bsi_stop_reason
-            t_delay_s = float(bbh.bsi_timescale_s[i])
-            break
-
-        r_th = pq.threshold_radius(m1_g, m2_g)
-        merger_radius_cm = Evolparams.merger_radius_factor * r_th
-        freq_gw = pq.frequency_from_sma(m1_g, m2_g, a_cm)
-
-        # Update time
-        t_delay_s += h
-
-        # Check time limits
-        if t_delay_s + t_ini_s > t_hubble_s:
-            # higher than the Hubble time, no merger & no continue ng
-            flags.continue_ng_flag[i] = 0
-            flags.merger_flag[i] = 0
-            flags.stop_reason_flag[i] = const.STOP_HUBBLE_LIMIT
-            break
-
-        # Check if merged
-        if (a_cm - r_th) / r_th <= Evolparams.merger_boundary_fraction:
-            flags.merger_flag[i] = 1
-            # Store final state before break
-            break
-
-        if t_delay_s + t_ini_s >= duty_cycle_s:
-            flags.continue_ng_flag[i] = 0
-            flags.merger_flag[i] = 0
-            flags.stop_reason_flag[i] = time_limit_reason
-            break
-
-        if loop_num >= max_loops:
-            print(f"Warning: Max loops reached for binary {i}")
-            flags.merger_flag[i] = 0
-            flags.stop_reason_flag[i] = const.STOP_INTEGRATION_LIMIT
-            break
-
-    # Store results
-    final_time_s = float(t_ini_s + t_delay_s)
-    track_recorder.record_final(final_time_s, a_cm, e)
-
-    bbh.sma_cm[i] = a_cm
-    bbh.ecc[i] = e
-    bbh.ecc10[i] = ecc10
-    bbh.ecc0p1[i] = ecc0p1
-    append_bbh_track(
+    return evolve_binary_orbit(
+        Evolparams,
         bbh,
-        binary_idx=i,
-        time_s=track_recorder.time_s,
-        sma_cm=track_recorder.sma_cm,
-        ecc=track_recorder.ecc,
+        agn,
+        i,
+        t_ini_s=t_ini_s,
+        initial_step_fraction=Evolparams.gas_initial_step_fraction,
+        ode_func=ode_with_gas,
+        ode_args=(agn, disk),
+        bsi_enabled=bsi_enabled,
+        merger_reachability_guard=can_merge_before_limit,
     )
-
-    return t_delay_s

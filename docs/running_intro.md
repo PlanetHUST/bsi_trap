@@ -242,13 +242,15 @@ The current workflow can:
 - Load the stellar-remnant input population from `input/input_data.txt`.
 - Sample an embedded BH population and assign formation times and radii.
 - Resolve mass-dependent migration targets and trap-arrival times.
-- Build a first-generation trap population with finite local pair-up.
+- Build a migration-only trap-arrival population for the main workflow.
+- Use the hierarchical scheduler to request the next accepted local pair,
+  including retained merger remnants returned to the live single reservoir.
 - Store the pairing timeline: later arrival, encounter time, pair-up delay, and
   BBH formation time.
-- Initialize first-generation BBH orbital and spin parameters.
+- Initialize each committed BBH population's orbital and spin parameters.
 - Evolve BBHs with either gas-plus-GW or GW-only evolution.
-- Recycle retained merger remnants into later hierarchical generations up to
-  `ModelConfig.max_generations`.
+- Recycle retained merger remnants until no later accepted pair forms inside the
+  AGN duty cycle.
 - Schedule reduced BSI events from the available trap-single reservoir and
   apply the weak BSI update when the BBH evolution reaches the scheduled time.
 - Write per-generation HDF5 files, sample manifests, worker metadata, combined
@@ -260,11 +262,12 @@ The current scientific unit of work is therefore:
 ```text
 one SMBH mass sample
   -> one AGN disk
-  -> one initial trap population
-  -> generation loop:
-       pair retained remnant singles
-       evolve BBHs
+  -> one migration/trap-arrival population
+  -> chronological scheduler loop:
+       pair the next eligible live singles/remnants
+       initialize and evolve the committed BBH population
        compute final remnant mass/spin/kick and retention
+       return retained remnants to the live singles
   -> HDF5 + summary/diagnostic outputs
 ```
 
@@ -273,19 +276,18 @@ one SMBH mass sample
 The current workflow does not yet implement the full AGN trap merger model.
 Important missing pieces are:
 
-- No time-dependent mixed single-BH/BBH trap reservoir event loop.
-- No continuously updated BSI event loop coupled to a time-dependent trap
-  reservoir; BSI scheduling is reduced to the current generation-level single
-  reservoir.
+- No single shared event queue that evolves active BBHs, scheduled BSI events,
+  pairings, and remnant feedback together.
+- BSI scheduling is still reduced to the live single reservoir available when a
+  committed BBH population is evolved.
 - No physical BSI exchange outcome that replaces a BBH component with an
   incoming single.
 - No prompt-merger BSI channel.
-- Hierarchical generations recycle retained merger remnants only; they do not
-  yet mix with a continuously evolving background single-BH reservoir.
 - No self-consistent update of compact-object scale height after vertical
   heating.
 - The CLI exposes the main current `ModelConfig` fields, including gas mode,
-  BSI enablement, pair-up scale, trap geometry, and maximum generation count.
+  BSI enablement, pair-up scale, trap geometry, and the legacy maximum
+  generation field.
   Future model fields still need to be added explicitly when they become part
   of the production workflow.
 - No production-grade statistical analysis.  Current plots are smoke
@@ -305,8 +307,8 @@ The practical caveats are:
 
 - `PYTHONPATH=src` is required unless packaging metadata is added later.
 - `input/` is ignored by Git, but the run depends on `input/input_data.txt`.
-- `docs/` is ignored by Git in this checkout; this file is at repository root
-  so it is visible to normal Git commands.
+- The docs are tracked in this checkout; update them with workflow changes so
+  the run guide and code contracts stay aligned.
 - The default CLI creates one `ModelConfig`; multi-model scans are available at
   the workflow layer but are not exposed as a rich CLI yet.
 - Simulation failures are captured per sample in `temp/model_*_sample_*.json`
@@ -326,8 +328,10 @@ src/workflow/sample_run.py
 src/cli/simulate_command.py
 src/bsi_trap/initialization/environment.py
 src/bsi_trap/initialization/trap_population.py
+src/bsi_trap/hierarchical/generations.py
 src/bsi_trap/evolve/pairing.py
 src/bsi_trap/evolve/gen_evolve.py
+src/bsi_trap/evolve/binary_evolution.py
 src/bsi_trap/evolve/bsi.py
 src/bsi_trap/storage/payload.py
 src/workflow/analysis_run.py

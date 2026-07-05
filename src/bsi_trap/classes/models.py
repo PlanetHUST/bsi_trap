@@ -179,8 +179,8 @@ class BBH_properties(object):
         self.idi = np.zeros(num, int)
         self.m1_msun = np.zeros(num, float)
         self.m2_msun = np.zeros(num, float)
-        self.sma_initial_cm = np.full(num, np.nan, float)
-        self.ecc_initial = np.full(num, np.nan, float)
+        self.sma_initial_cm = np.full(num, np.nan, float)  # for copies
+        self.ecc_initial = np.full(num, np.nan, float)  # for copies
         self.sma_cm = np.zeros(num, float)
         self.ecc = np.zeros(num, float)
 
@@ -229,6 +229,7 @@ class Single_BH_properties(object):
         self.t_ini_s = np.zeros(num, float)
         self.chi = np.full(num, np.nan, float)
         self.theta = np.full(num, np.nan, float)
+        self.r_pair_cm = np.full(num, np.nan, float)
 
 
 class BBHEvolverParams:

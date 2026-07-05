@@ -119,12 +119,13 @@ large density of BHs in the trap, after calculate the binary and single populati
 
         1. build AGN/disk
         2. build embedded BH population
-        3. convert embedded BHs into BBHs + single BHs at trap
-        4. initialize BBH orbital/spin parameters
-        5. evolve BBHs with gas/GW and scheduled weak BSI
-        6. construct pairing/evolution/BSI/remnant ledgers
-        7. build retained-remnant next-generation inputs
-        8. save generation HDF5 payloads and sample metadata
+        3. prepare migration-only trap-arrival population
+        4. run chronological pairing/remnant scheduler
+        5. initialize each committed BBH population
+        6. evolve BBHs with gas/GW and scheduled weak BSI
+        7. construct pairing/evolution/BSI/remnant ledgers
+        8. return retained remnants to the live single reservoir
+        9. save generation HDF5 payloads and sample metadata
 
 ---
 
@@ -170,10 +171,11 @@ Current sample workflow:
 ```python
 def run_physics_sample(...):
     environment = make_environment(...)
-    population = make_trap_population(...)
-    evolution = make_generation(...)
-    payload = generation_data(...)
-    save_generation_to_file(payload, ...)
+    population = make_trap_population(..., pair_initial=False)
+    run = evolve_hierarchical_generations(...)
+    for record in run.records:
+        payload = generation_data(...)
+        save_generation_to_file(payload, ...)
     return sample_manifest
 ```
 

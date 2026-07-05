@@ -98,17 +98,18 @@ def run_physics_sample(
         rng_nsc=rng.nsc,
         rng_orbit=rng.dynamics,
         rng_spin=rng.spin,
+        pair_initial=False,
     )
     _progress(
         sample_index,
         model_config.simulation_type,
-        "trap population: "
+        "trap arrival population: "
         f"embedded={population.embedded_bh.num}, "
         f"BBH={population.binaries.num}, "
         f"single={population.singles.num}",
     )
 
-    # 4. binary evolve to merges
+    # 4. Binary evolve to mergers
     population.binaries.sma_initial_cm = np.array(
         population.binaries.sma_cm,
         copy=True,
@@ -117,6 +118,7 @@ def run_physics_sample(
         population.binaries.ecc,
         copy=True,
     )
+
     hierarchical_run = evolve_hierarchical_generations(
         Evolparams=_evolver_params(disk),
         model_config=model_config,
@@ -126,12 +128,13 @@ def run_physics_sample(
         rng_pair_up=rng.pair_up,
         rng_orbit=rng.dynamics,
         rng_spin=rng.spin,
-        max_generations=model_config.max_generations,
     )
+
     final_record = hierarchical_run.final_record
     evolved_binary_count = hierarchical_run.evolved_binary_count
     merger_count = hierarchical_run.merger_count
     generation_count = hierarchical_run.generation_count
+
     _progress(
         sample_index,
         model_config.simulation_type,

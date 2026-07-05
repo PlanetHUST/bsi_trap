@@ -5,12 +5,13 @@ This document is the consolidated workflow introduction for the current
 spine and folds in the implemented initialization, evolution, storage, and
 diagnostic workflow described across the other local notes.
 
-The current codebase is best understood as an AGN migration-trap BBH
-generation loop.  It builds an AGN disk and embedded black-hole reservoir,
-forms first-generation BBHs at the migration trap, evolves those BBHs through
-gas/GW/BSI effects, computes merger-remnant mass/spin/kick and retention, and
-recycles retained remnants into later hierarchical generations up to the model
-generation cap.
+The current codebase is best understood as an AGN migration-trap BBH event
+workflow.  It builds an AGN disk and embedded black-hole reservoir, computes
+trap-arrival times, lets a chronological scheduler commit pairings, evolves each
+committed BBH through gas/GW/BSI effects, computes merger-remnant
+mass/spin/kick and retention, and recycles retained remnants into the live
+single-BH reservoir until no further accepted pair forms before the AGN duty
+cycle ends.
 
 ## Physical Scenario
 
@@ -20,10 +21,11 @@ The modeled channel is:
 SMBH + AGN disk
     -> embedded BH reservoir from an NSC/catalog population
     -> migration toward mass-dependent trap targets
+    -> trap-arrival single-BH reservoir
     -> finite pair-up at/near the trap
-    -> first-generation BBHs plus unpaired trap singles
+    -> committed BBHs plus unpaired trap singles/remnants
     -> BBH hardening, GW evolution, and scheduled BSI effects
-    -> merger/non-merger state recorded to HDF5
+    -> merger/non-merger state and remnant feedback recorded to HDF5
 ```
 
 The physical reason for not treating the trap as an instantaneous BBH factory
@@ -35,8 +37,9 @@ The current pair-up and BSI treatment is reduced and local.  It is not yet a
 resolved many-body scattering calculation, but the code now keeps the main
 state responsibilities separate:
 
-- pair-up creates BBHs and records BBH formation times;
-- BBH evolution changes orbital parameters;
+- pair-up creates the next committed BBH and records its formation time;
+- retained remnants return to the live single reservoir when retained;
+- BBH evolution changes orbital parameters for committed binaries;
 - BSI changes binary parameters through a reduced weak perturbation;
 - timelines record when discrete events happened.
 
@@ -57,10 +60,16 @@ ModelConfig + SMBH mass + sample seed
 make_environment()
         |
         v
-make_trap_population()
+make_trap_population(pair_initial=False)
         |
         v
-make_generation()
+evolve_hierarchical_generations()
+        |
+        v
+construct_pairing_up_timeline(max_events=1)
+        |
+        v
+BBH_params_initialize() + make_generation()
         |
         v
 generation_data() + save_generation_to_file()
@@ -82,10 +91,11 @@ population containers, storage schema, and plotting summaries live under
 | Parallel execution | `src/workflow/parallel_manager.py`, `src/bsi_trap/parallel_compute/` | Run samples and write worker metadata. |
 | Environment | `src/bsi_trap/initialization/environment.py` | Build AGN properties, pAGN disk profile, and shared reference trap. |
 | Embedded population | `src/bsi_trap/initialization/embedded_bh.py` | Sample embedded BH masses, formation times, and initial radii. |
-| Trap population | `src/bsi_trap/initialization/trap_population.py` | Convert embedded BHs into BBHs and trap singles. |
-| Pairing physics | `src/bsi_trap/evolve/pairing.py`, `src/bsi_trap/functions/pairing_physics.py` | Build the event-driven initial pair-up timeline. |
+| Trap population | `src/bsi_trap/initialization/trap_population.py` | Prepare embedded-BH migration and trap-arrival state; optional `pair_initial=True` still builds standalone initial pairing diagnostics. |
+| Pairing physics | `src/bsi_trap/evolve/pairing.py`, `src/bsi_trap/functions/pairing_physics.py` | Build event-driven pair-up timelines; the scheduler can request only the next accepted event with `max_events=1`. |
+| Hierarchical event scheduler | `src/bsi_trap/hierarchical/generations.py` | Own the chronological pairing/remnant recycling loop until no later pair forms inside the AGN duty cycle. |
 | BBH parameters | `src/bsi_trap/initialization/bbh_parameters.py` | Assign BBH semimajor axes, eccentricities, spins, and tilts. |
-| BBH evolution | `src/bsi_trap/evolve/gen_evolve.py`, `gas_harden.py`, `gw.py` | Evolve BBHs through gas/GW dynamics and BSI effects. |
+| BBH evolution | `src/bsi_trap/evolve/gen_evolve.py`, `binary_evolution.py`, `gas_harden.py`, `gw.py` | Evolve committed BBHs through gas/GW dynamics and BSI effects while sharing orbit bookkeeping. |
 | BSI effects | `src/bsi_trap/evolve/bsi.py` | Apply scheduled weak BSI perturbations and construct the BSI event ledger. |
 | Timelines | `src/bsi_trap/evolve/timeline.py` | Store event/output timelines; not the place for physical updates. |
 | Storage | `src/bsi_trap/storage/` | Own HDF5 contract, payload construction, combination, and summaries. |
@@ -169,8 +179,8 @@ stable_mask and (t_reach_s < AGN_lifetime)
 ```
 
 Objects without a stable target, invalid migration route, or timely arrival
-remain in the embedded reservoir but are not converted into first-generation
-BBHs or trap singles.
+remain in the embedded reservoir and are not admitted to the live trap-reservoir
+events.
 
 ## Local Trap Geometry
 
@@ -195,7 +205,7 @@ r_pair = r_trap_target + Normal(0, trap_radial_dispersion_scale_heights H_gas)
 clipped to the configured trap annulus.  This keeps local geometry explicit
 instead of treating all reached BHs as a fully mixed one-zone bath.
 
-## Pair-Up and First-Generation BBHs
+## Pair-Up and Committed BBHs
 
 The authoritative pair-up function is:
 
@@ -224,7 +234,14 @@ A pair is accepted only if the resulting BBH formation time is inside the AGN
 lifetime.  Both embedded-BH members then store reciprocal `trap_flag` indices
 and the same `t_pair_s`.
 
-The conversion step then creates:
+In the main sample workflow, `make_trap_population(pair_initial=False)` stops
+after migration and trap admission.  `evolve_hierarchical_generations()` then
+owns the live reservoir.  At each scheduler step it asks
+`construct_pairing_up_timeline(..., max_events=1)` for the next accepted pair,
+initializes only that committed BBH population, evolves it, and returns retained
+merger remnants to the live singles before requesting the following pair.
+
+The conversion step creates the population for the current committed event:
 
 - `BBH_properties` from reciprocal embedded-BH pairs;
 - `Single_BH_properties` from reached, unpaired trap objects.
@@ -249,7 +266,7 @@ These are the initial conditions for the BBH evolution stage.
 
 ## BBH Evolution and Timelines
 
-`make_generation()` evolves one BBH generation.  For each BBH:
+`make_generation()` evolves one committed BBH population.  For each BBH:
 
 ```text
 evolve_single_binary()
@@ -258,8 +275,10 @@ evolve_single_binary()
 ```
 
 The smooth evolution updates orbital state through gas hardening and/or Peters
-GW evolution.  Each evolution function writes the final `sma_cm`, `ecc`,
-`ecc10`, and `ecc0p1` back to `BBH_properties`.
+GW evolution.  The shared orbit loop in `binary_evolution.py` owns the mutable
+bookkeeping that both `gas_harden.py` and `gw.py` need: stop conditions, BSI
+step boundaries, frequency probes, accepted-track recording, and final state
+writeback to `BBH_properties`.
 
 The hardening routines should not carry scenario policy as anonymous literals.
 `BBHEvolverParams` owns the current integration and diagnostic policy:
@@ -288,11 +307,12 @@ After BBH evolution, `build_hierarchical_mergers()` computes merger-remnant
 mass, spin, GW recoil, disk retention, trap-overload status, and the retained
 single-BH seeds that can feed a later hierarchical generation.
 
-`evolve_hierarchical_generations()` then repeats this cycle: retained remnant
-singles are paired with the same local trap-pairing machinery, initialized as
-the next BBH generation, evolved, and processed for final remnant kick and
-retention.  Each generation keeps its own pairing timeline, evolution timeline,
-and remnant ledger.
+`evolve_hierarchical_generations()` owns the outer event loop.  It starts from
+the migration-arrival singles, commits one accepted pair at a time, evolves that
+committed BBH population, mixes retained remnants back into the live singles,
+and stops when fewer than two live singles remain or no further pair forms
+inside the AGN duty cycle.  Each committed event keeps its own pairing timeline,
+evolution timeline, and remnant ledger.
 
 The important design rule is that a timeline records event times and outcomes;
 it does not own the physical update.
@@ -411,8 +431,11 @@ Implemented now:
 - AGN/disk environment construction;
 - embedded BH sampling;
 - mass-dependent migration targets;
+- migration-only trap-arrival population construction;
 - event-driven local pair-up;
-- first-generation BBH and trap-single initialization;
+- chronological pairing/remnant recycling through
+  `evolve_hierarchical_generations()`;
+- committed-BBH and trap-single initialization;
 - gas/GW evolution;
 - scheduled reduced BSI effects;
 - per-generation HDF5 storage;
@@ -420,15 +443,13 @@ Implemented now:
 
 Still incomplete:
 
-- full mixed single-BH/BBH population evolution during the AGN lifetime;
-- mixing retained merger remnants with a continuously evolving background
-  single-BH reservoir;
-- hierarchical generation construction beyond the first evolved generation;
+- a single shared event queue for active BBHs, scheduled BSI events, and
+  pair/remnant reservoir updates;
+- physical BSI exchange, ejection, ionization, or prompt-merger channels;
 - production-grade scientific calibration of the reduced pair-up and BSI
   prescriptions.
 
-The next major framework step should be the population-level trap evolution
-loop:
+The next major framework step should be the shared active-BBH event loop:
 
 ```text
 inject newly arrived singles

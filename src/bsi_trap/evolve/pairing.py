@@ -210,22 +210,23 @@ def construct_pairing_up_timeline(
     smbh_mass_msun: float,
     end_time_s: float,
     rng_pair_up: np.random.Generator,
+    max_events: int | None = None,
 ) -> PairingTimeline:
-    """Construct first-generation BBH pairing events up to ``end_time_s``.
+    """Construct BBH pairing events up to ``end_time_s``.
 
     ``trap_flag`` is ``-1`` outside the reached population, ``-2`` for trap
     singles, and a non-negative symmetric partner index for paired BBHs.
-    ``t_pair_s`` stores BBH formation time.  The returned timeline keeps both
-    the sampled encounter time and the post-encounter gas pair-up delay.
+    ``t_pair_s`` stores BBH formation time. If ``max_events`` is set, timeline
+    construction stops after that many committed pairings.
     """
 
     ####### 1. Prepare for trap radius #######
 
-    # get single BH reaching mask, and reaching timeline
+    # Get single BH reaching mask, and reaching timeline
     reached_mask = np.asarray(reached_mask, dtype=bool)
     reached_times_s = embedded_bh.t_reach_s[reached_mask]
 
-    # safe check
+    # Safe check
     if reached_mask.shape != (embedded_bh.num,):
         raise ValueError(
             f"reached_mask must have shape ({embedded_bh.num},), "
@@ -235,6 +236,8 @@ def construct_pairing_up_timeline(
         raise ValueError("end_time_s must be finite and positive")
     if not np.isfinite(smbh_mass_msun) or smbh_mass_msun <= 0.0:
         raise ValueError("SMBH mass must be finite and positive")
+    if max_events is not None and max_events < 1:
+        raise ValueError("max_events must be at least 1 when specified")
 
     if np.any(~np.isfinite(reached_times_s)) or np.any(reached_times_s < 0.0):
         raise ValueError("Reached BH arrival times must be finite and nonnegative")
@@ -248,7 +251,7 @@ def construct_pairing_up_timeline(
 
     actual_task_mask = active_mask & ~np.isfinite(embedded_bh.r_pair_cm)
 
-    # set random initial radius in the trap
+    # Set random initial radius in the trap
     if np.any(actual_task_mask):
         radial_scale_cm = (
             model_config.trap_radial_dispersion_scale_heights
@@ -265,7 +268,7 @@ def construct_pairing_up_timeline(
             disk.r_trap_cm,
         )
 
-        # normal distribution center offset
+        # Normal distribution center offset
         offsets_cm = rng_pair_up.normal(0.0, radial_scale_cm, actual_task_mask.sum())
         offsets_cm = np.clip(
             offsets_cm,
@@ -299,10 +302,10 @@ def construct_pairing_up_timeline(
     pair_delays_s: list[float] = []
     formation_times_s: list[float] = []
 
-    # step current time for constructing timeline
+    # Step current time for constructing timeline
     current_time_s = float(embedded_bh.t_reach_s[arrival_idx[0]])
 
-    def process_until(time_limit_s: float) -> None:
+    def process_until(time_limit_s: float) -> bool:
 
         nonlocal current_time_s
 
@@ -322,7 +325,7 @@ def construct_pairing_up_timeline(
             )
 
             if event_parms is None:
-                return
+                return False
 
             encounter_abs_time_s, first_ind, second_ind, pair_delay_s = event_parms
             bbh_formation_time_s = encounter_abs_time_s + pair_delay_s
@@ -352,14 +355,19 @@ def construct_pairing_up_timeline(
             encounter_times_s.append(encounter_abs_time_s)
             pair_delays_s.append(pair_delay_s)
             formation_times_s.append(bbh_formation_time_s)
+            if max_events is not None and len(formation_times_s) >= max_events:
+                return True
+        return False
 
     for index in arrival_idx:
         arrival_time_s = float(embedded_bh.t_reach_s[index])
-        process_until(arrival_time_s)
+        if process_until(arrival_time_s):
+            break
         current_time_s = arrival_time_s
         waiting_idx.append(int(index))
 
-    process_until(end_time_s)
+    if max_events is None or len(formation_times_s) < max_events:
+        process_until(end_time_s)
 
     if not formation_times_s:
         return PairingTimeline.empty()

@@ -39,9 +39,24 @@ def make_trap_population(
     rng_nsc: np.random.Generator,
     rng_orbit: np.random.Generator,
     rng_spin: np.random.Generator,
+    pair_initial: bool = True,
 ) -> TrapPopulation:
     """Build the embedded, binary, and single BH trap populations."""
     embedded_bh = embedded_BH_initialize(agn, disk, rng_nsc)
+    if not pair_initial:
+        prepare_trap_arrival_state(
+            model_config=model_config,
+            agn=agn,
+            disk=disk,
+            ebh=embedded_bh,
+        )
+        return TrapPopulation(
+            embedded_bh=embedded_bh,
+            binaries=BBH_properties(0),
+            singles=init_sbh(embedded_bh),
+            pairing_timeline=PairingTimeline.empty(),
+        )
+
     binaries, singles, pairing_timeline = construct_initial_trap_population(
         model_config=model_config,
         agn=agn,
@@ -104,23 +119,19 @@ def _validate_trap_state(ebh: Embedded_BH, end_time_s: float) -> None:
             raise ValueError("BBH formation cannot precede either component arrival")
 
 
-def construct_initial_trap_population(
+def prepare_trap_arrival_state(
     model_config: ModelConfig,
     agn: AGN_properties,
     disk: DiskProfile,
     ebh: Embedded_BH,
-    rng_pair_up: np.random.Generator,
-) -> tuple[BBH_properties, Single_BH_properties, PairingTimeline]:
-    """Build first-generation BBH/single populations and their pairing timeline."""
-
-    # validate ebh for safe input
+) -> np.ndarray:
+    """Resolve migration and mark reached trap objects as live singles."""
     _validate_embedded_population(ebh)
 
     end_time_s = agn.lifetime_myr * Myr
     if not np.isfinite(end_time_s) or end_time_s <= 0.0:
         raise ValueError("AGN lifetime must define a finite, positive end time")
 
-    # 1. Get migration timescales, target trap radius
     migration_results = resolve_mass_dependent_trap_migration(
         agn=agn,
         disk=disk,
@@ -142,7 +153,31 @@ def construct_initial_trap_population(
     reached_mask = migration_results.stable_mask & (ebh.t_reach_s < end_time_s)
     trap_context = build_trap_context(disk, model_config)
     ebh.trap_width_cm = trap_context.width_cm
+    ebh.trap_flag.fill(-1)
+    ebh.trap_flag[reached_mask] = -2
+    ebh.t_pair_s.fill(np.nan)
+    return reached_mask
 
+
+def construct_initial_trap_population(
+    model_config: ModelConfig,
+    agn: AGN_properties,
+    disk: DiskProfile,
+    ebh: Embedded_BH,
+    rng_pair_up: np.random.Generator,
+) -> tuple[BBH_properties, Single_BH_properties, PairingTimeline]:
+    """Build first-generation BBH/single populations and their pairing timeline."""
+
+    end_time_s = agn.lifetime_myr * Myr
+    reached_mask = prepare_trap_arrival_state(
+        model_config=model_config,
+        agn=agn,
+        disk=disk,
+        ebh=ebh,
+    )
+    trap_context = build_trap_context(disk, model_config)
+
+    # 2. Construct sBH to BBH timeline
     pairing_timeline = construct_pairing_up_timeline(
         embedded_bh=ebh,
         reached_mask=reached_mask,
@@ -156,11 +191,13 @@ def construct_initial_trap_population(
 
     _validate_trap_state(ebh, end_time_s)
 
+    # 3. initialization population
     bbh = init_bbh(ebh)
     sbh = init_sbh(ebh)
 
     reached_count = int(np.count_nonzero(reached_mask))
 
+    # number conservation check
     if 2 * bbh.num + sbh.num != reached_count:
         raise ValueError("Initial trap population does not conserve reached BHs")
 
@@ -222,8 +259,9 @@ def init_sbh(ebh: Embedded_BH) -> Single_BH_properties:
     """Create the single-BH population from reached, unpaired trap objects."""
     single_idx = np.flatnonzero(ebh.trap_flag == -2)
     sbh = Single_BH_properties(single_idx.size)
-    sbh.m_msun = ebh.m_msun[single_idx]
-    sbh.t_ini_s = ebh.t_reach_s[single_idx]
-    sbh.chi = ebh.chi[single_idx]
-    sbh.theta = ebh.theta[single_idx]
+    sbh.m_msun = np.array(ebh.m_msun[single_idx], copy=True)
+    sbh.t_ini_s = np.array(ebh.t_reach_s[single_idx], copy=True)
+    sbh.chi = np.array(ebh.chi[single_idx], copy=True)
+    sbh.theta = np.array(ebh.theta[single_idx], copy=True)
+    sbh.r_pair_cm = np.array(ebh.r_pair_cm[single_idx], copy=True)
     return sbh
