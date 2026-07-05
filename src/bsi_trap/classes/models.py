@@ -212,6 +212,11 @@ class BBH_properties(object):
         self.track_time_s = np.empty(0, dtype=np.float64)
         self.track_sma_cm = np.empty(0, dtype=np.float64)
         self.track_ecc = np.empty(0, dtype=np.float64)
+        self._track_binary_idx_chunks: list[IntArray] = []
+        self._track_step_idx_chunks: list[IntArray] = []
+        self._track_time_s_chunks: list[FloatArray] = []
+        self._track_sma_cm_chunks: list[FloatArray] = []
+        self._track_ecc_chunks: list[FloatArray] = []
         self.flags = BBH_flags(num)
 
 
@@ -235,11 +240,8 @@ class BBHEvolverParams:
         self.hlist = hlist
         self.cslist = cslist
 
-        # Parameters for weak BSI
+        # Parameters for reduced weak BSI
         self.bsi_eta_weak = 2.0  # Maximum impact parameter in units of a for weak BSI
-        self.bsi_eta_strong = (
-            0.5  # Maximum impact parameter in units of a for strong BSI
-        )
         self.bsi_sigma_e0 = 0.1  # Base eccentricity change for weak BSI
 
         # Eccentricity limits to avoid unphysical values
@@ -247,6 +249,16 @@ class BBHEvolverParams:
         self.ecc_ceiling = 0.9999
         self.tol_a = 1.0e-3
         self.tol_e = 1.0e-3
+
+        # Numerical/evolution policy for the reduced BBH hardening model.
+        self.gw_initial_step_fraction = 1.0e-2
+        self.gas_initial_step_fraction = 1.0e-6
+        self.merger_radius_factor = 1.1
+        self.merger_boundary_fraction = 1.0e-1
+        self.max_evolution_loops = 1_000_000
+        self.track_max_smooth_points = 512
+        self.eccentricity_probe_low_hz = 0.1
+        self.eccentricity_probe_high_hz = 10.0
 
         self.trap_bsi_context = None  # To store local conditions for BSI calculations
 
@@ -258,9 +270,6 @@ class BBH_flags:
         self.continue_ng_flag = np.zeros(num, int)
         self.hard = np.ones(num, int)
         self.bsi_event_flag = np.zeros(num, int)
-        self.bsi_exchange_flag = np.zeros(num, int)
-        self.bsi_ionization_flag = np.zeros(num, int)
-        self.bsi_ejection_flag = np.zeros(num, int)
         self.trap_reached_flag = np.zeros(num, int)  # 1 if trap reached, 0 otherwise
         self.stop_reason_flag = np.zeros(num, int)  # code for why evolution stopped
 

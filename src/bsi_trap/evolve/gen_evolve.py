@@ -9,7 +9,7 @@ from bsi_trap.classes.models import (
     DiskProfile,
 )
 from bsi_trap.config.model_config import ModelConfig
-from bsi_trap.evolve.bsi import construct_bsi_timeline
+from bsi_trap.evolve.bsi import construct_bsi_timeline, schedule_bsi_events
 from bsi_trap.evolve.gas_harden import evolve_gas
 from bsi_trap.evolve.gw import evolve_gw_only
 from bsi_trap.evolve.timeline import (
@@ -20,6 +20,7 @@ from bsi_trap.evolve.timeline import (
     IndexArray,
     IntArray,
 )
+from bsi_trap.evolve.tracks import finalize_bbh_tracks
 from bsi_trap.constant.stop_reason import StopReasons
 from bsi_trap.evolve import numeric
 from bsi_trap.evolve import physical_quantity as pq
@@ -93,10 +94,20 @@ def make_generation(
     hierarchical-remnant ledger.
     """
     num = bbh.num
+    if model_config.bsi_enabled:
+        schedule_bsi_events(
+            model_config=model_config,
+            agn=agn,
+            disk=disk,
+            bbh=bbh,
+            sbh=sbh,
+            rng=rng_orbit,
+        )
 
     for i in range(num):
         t_del_s = evolve_single_binary(Evolparams, model_config, agn, disk, bbh, i)
         bbh.t_del_s[i] = t_del_s
+    finalize_bbh_tracks(bbh)
 
     bsi_timeline = construct_bsi_timeline(bbh)
     hierarchical_mergers = build_hierarchical_mergers(
@@ -154,7 +165,7 @@ def _validate_initial_binary(
         return StopReasons.STOP_NON_PHYSICAL_ORBIT
 
     r_th = pq.threshold_radius(m1_g, m2_g)
-    if (a_cm - r_th) / r_th <= 1.0e-1:
+    if (a_cm - r_th) / r_th <= Evolparams.merger_boundary_fraction:
         return StopReasons.STOP_INITIAL_BINARY_TOO_TIGHT
 
     return None

@@ -29,13 +29,45 @@ def compute_merger_time_estimate(m1, m2, a, e):
     )
 
 
-def compute_eccentricity_at_frequency(m1, m2, a, e, target_freq):
-    """Compute eccentricity when GW frequency reaches target_freq Hz"""
-    freq = 1.0 / np.pi * np.sqrt(const.G * (m1 + m2) / a**3)
-    if abs(freq - target_freq) < abs(freq) * 0.1:
-        # print(f'ecc10 set as {e}')
-        return e
-    return float(e) if np.isfinite(e) else np.nan
+def compute_eccentricity_at_frequency(
+    m1,
+    m2,
+    a,
+    e,
+    target_freq,
+    *,
+    previous_a=None,
+    previous_e=None,
+):
+    """Interpolate eccentricity when a step brackets ``target_freq``."""
+    freq = frequency_from_sma(m1, m2, a)
+    if not (
+        np.isfinite(freq)
+        and np.isfinite(target_freq)
+        and target_freq > 0.0
+        and np.isfinite(e)
+    ):
+        return np.nan
+
+    if previous_a is not None and previous_e is not None:
+        previous_freq = frequency_from_sma(m1, m2, previous_a)
+        if (
+            np.isfinite(previous_freq)
+            and np.isfinite(previous_e)
+            and previous_freq > 0.0
+            and min(previous_freq, freq) <= target_freq <= max(previous_freq, freq)
+        ):
+            if np.isclose(previous_freq, freq):
+                return float(e)
+            weight = (
+                np.log(target_freq) - np.log(previous_freq)
+            ) / (np.log(freq) - np.log(previous_freq))
+            weight = float(np.clip(weight, 0.0, 1.0))
+            return float(previous_e + weight * (e - previous_e))
+
+    if np.isclose(freq, target_freq):
+        return float(e)
+    return np.nan
 
 
 @overload
@@ -87,7 +119,3 @@ def migration_threshold(
     if return_q:
         return mcrit_msun, qcrit, h
     return mcrit_msun
-
-
-def trap_width_elimate():
-    pass

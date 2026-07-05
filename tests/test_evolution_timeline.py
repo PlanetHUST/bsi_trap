@@ -21,12 +21,20 @@ from bsi_trap.constant.stop_reason import (
     stop_reason_type,
 )
 from bsi_trap.evolve import gen_evolve
-from bsi_trap.evolve.bsi import apply_scheduled_bsi_step, construct_bsi_timeline
+from bsi_trap.evolve.bsi import (
+    apply_scheduled_bsi_step,
+    construct_bsi_timeline,
+    schedule_bsi_events,
+)
 from bsi_trap.evolve.gas_harden import ode_with_gas
 from bsi_trap.evolve.gw import ode_gw_only
 from bsi_trap.evolve.numeric import para_evo
-from bsi_trap.evolve.physical_quantity import threshold_radius
+from bsi_trap.evolve.physical_quantity import (
+    compute_eccentricity_at_frequency,
+    threshold_radius,
+)
 from bsi_trap.evolve.timeline import BSI_Timeline, EvolutionTimeline, PairingTimeline
+from bsi_trap.evolve.tracks import append_bbh_track, finalize_bbh_tracks
 from bsi_trap.hierarchical.generations import (
     evolve_hierarchical_generations,
     make_remnant_generation_population,
@@ -62,26 +70,19 @@ def _wide_disk() -> DiskProfile:
 
 
 class TestEvolutionTimeline(TestCase):
-    def test_bsi_timeline_uses_recorded_flags_and_delays(self) -> None:
+    def test_bsi_timeline_records_applied_events(self) -> None:
         bbh = BBH_properties(3)
         bbh.t_ini_s[:] = [10.0, 20.0, 30.0]
         bbh.flags.bsi_event_flag[:] = [1, 1, 0]
-        bbh.flags.bsi_exchange_flag[:] = [0, 1, 0]
-        bbh.flags.bsi_ejection_flag[:] = [0, 0, 1]
 
         timeline = construct_bsi_timeline(
             bbh,
             event_delay_s=np.array([1.0, 2.0, 3.0]),
         )
 
-        np.testing.assert_array_equal(timeline.binary_idx, [0, 1, 2])
-        np.testing.assert_allclose(timeline.event_s, [11.0, 22.0, 33.0])
-        np.testing.assert_array_equal(
-            timeline.event_type,
-            np.array(["weak", "exchange", "ejection"], dtype=np.str_),
-        )
-        np.testing.assert_allclose(timeline.weak_perturbation_s, [11.0])
-        np.testing.assert_allclose(timeline.strong_perturbation_s, [22.0, 33.0])
+        np.testing.assert_array_equal(timeline.binary_idx, [0, 1])
+        np.testing.assert_allclose(timeline.event_s, [11.0, 22.0])
+        np.testing.assert_allclose(timeline.weak_perturbation_s, [11.0, 22.0])
 
     def test_bsi_timeline_is_empty_without_event_delays(self) -> None:
         bbh = BBH_properties(1)
@@ -128,10 +129,86 @@ class TestEvolutionTimeline(TestCase):
 
         timeline = construct_bsi_timeline(bbh)
         np.testing.assert_allclose(timeline.event_s, [10.5])
-        np.testing.assert_array_equal(
-            timeline.event_type,
-            np.array(["weak"], dtype=np.str_),
+        np.testing.assert_allclose(timeline.weak_perturbation_s, [10.5])
+
+    def test_bsi_scheduler_samples_live_single_reservoir_delays(self) -> None:
+        bbh = BBH_properties(2)
+        bbh.m1_msun[:] = [30.0, 25.0]
+        bbh.m2_msun[:] = [20.0, 15.0]
+        bbh.sma_cm[:] = [1.0e10, 2.0e10]
+        bbh.t_ini_s[:] = [0.0, 2.0 * const.Myr]
+
+        sbh = Single_BH_properties(3)
+        sbh.m_msun[:] = [10.0, 12.0, 14.0]
+        sbh.t_ini_s[:] = [1.0, 1.5, 3.0]
+        sbh.t_ini_s *= const.Myr
+        agn = AGN_properties(M_SMBH_msun=1.0e6, lifetime_myr=10.0)
+
+        scheduled = schedule_bsi_events(
+            ModelConfig(model_name="bsi-scheduler-test", bsi_enabled=True),
+            agn,
+            _disk(),
+            bbh,
+            sbh,
+            np.random.default_rng(1),
         )
+
+        self.assertTrue(np.all(scheduled))
+        self.assertTrue(np.all(np.isfinite(bbh.bsi_timescale_s)))
+        event_s = bbh.t_ini_s + bbh.bsi_timescale_s
+        self.assertTrue(np.all(event_s >= bbh.t_ini_s))
+        self.assertTrue(np.all(event_s >= np.min(sbh.t_ini_s)))
+        self.assertTrue(np.all(event_s <= agn.lifetime_myr * const.Myr))
+
+    def test_bsi_scheduler_preserves_existing_delays(self) -> None:
+        bbh = BBH_properties(1)
+        bbh.m1_msun[:] = [30.0]
+        bbh.m2_msun[:] = [20.0]
+        bbh.sma_cm[:] = [1.0e10]
+        bbh.t_ini_s[:] = [0.0]
+        bbh.bsi_timescale_s[:] = [0.25 * const.Myr]
+
+        sbh = Single_BH_properties(1)
+        sbh.m_msun[:] = [10.0]
+        sbh.t_ini_s[:] = [0.0]
+
+        scheduled = schedule_bsi_events(
+            ModelConfig(model_name="bsi-preserve-test", bsi_enabled=True),
+            AGN_properties(M_SMBH_msun=1.0e6, lifetime_myr=10.0),
+            _disk(),
+            bbh,
+            sbh,
+            np.random.default_rng(1),
+        )
+
+        self.assertFalse(scheduled[0])
+        np.testing.assert_allclose(bbh.bsi_timescale_s, [0.25 * const.Myr])
+
+    def test_eccentricity_at_frequency_interpolates_bracketed_step(self) -> None:
+        m1_g = 30.0 * const.msun
+        m2_g = 20.0 * const.msun
+        target_freq = 10.0
+        target_a = (
+            const.G * (m1_g + m2_g) / (np.pi * target_freq) ** 2
+        ) ** (1.0 / 3.0)
+
+        previous_a = 2.0 * target_a
+        current_a = 0.5 * target_a
+        previous_e = 0.8
+        current_e = 0.2
+
+        interpolated = compute_eccentricity_at_frequency(
+            m1_g,
+            m2_g,
+            current_a,
+            current_e,
+            target_freq,
+            previous_a=previous_a,
+            previous_e=previous_e,
+        )
+
+        self.assertGreater(interpolated, current_e)
+        self.assertLess(interpolated, previous_e)
 
     def test_make_generation_returns_absolute_evolution_timeline(self) -> None:
         bbh = BBH_properties(2)
@@ -203,13 +280,36 @@ class TestEvolutionTimeline(TestCase):
             StopReasonType.HIERARCHICAL_REMNANT,
         )
         self.assertEqual(
-            stop_reason_type(StopReasons.STOP_BSI_IONIZATION),
-            StopReasonType.BSI,
-        )
-        self.assertEqual(
             stop_reason_type(StopReasons.STOP_NON_PHYSICAL_ORBIT),
             StopReasonType.BINARY_EVOLUTION,
         )
+
+    def test_bbh_track_append_stages_chunks_until_finalization(self) -> None:
+        bbh = BBH_properties(2)
+
+        append_bbh_track(
+            bbh,
+            binary_idx=0,
+            time_s=[1.0, 2.0],
+            sma_cm=[10.0, 9.0],
+            ecc=[0.2, 0.1],
+        )
+        append_bbh_track(
+            bbh,
+            binary_idx=1,
+            time_s=[3.0],
+            sma_cm=[8.0],
+            ecc=[0.05],
+        )
+
+        self.assertEqual(bbh.track_time_s.size, 0)
+        finalize_bbh_tracks(bbh)
+
+        np.testing.assert_array_equal(bbh.track_binary_idx, [0, 0, 1])
+        np.testing.assert_array_equal(bbh.track_step_idx, [0, 1, 0])
+        np.testing.assert_allclose(bbh.track_time_s, [1.0, 2.0, 3.0])
+        np.testing.assert_allclose(bbh.track_sma_cm, [10.0, 9.0, 8.0])
+        np.testing.assert_allclose(bbh.track_ecc, [0.2, 0.1, 0.05])
 
     def test_para_evo_passes_evolver_params_to_rk4(self) -> None:
         evol_params = BBHEvolverParams(
@@ -435,6 +535,74 @@ class TestEvolutionProcess(TestCase):
         self.assertLess(bbh.track_sma_cm[1], bbh.track_sma_cm[0])
         self.assertGreater(bbh.track_ecc[1], bbh.track_ecc[0])
 
+    def test_generation_schedules_bsi_from_live_singles(self) -> None:
+        bbh = self._near_merger_binary(sma_factor=1.0e3)
+        sbh = Single_BH_properties(1)
+        sbh.m_msun[:] = [10.0]
+        sbh.t_ini_s[:] = [0.0]
+
+        gen_evolve.make_generation(
+            self._evol_params(),
+            ModelConfig(
+                model_name="live-bsi-generation-test",
+                gas_mode="without_gas",
+                bsi_enabled=True,
+            ),
+            AGN_properties(M_SMBH_msun=1.0e6, lifetime_myr=10.0),
+            _disk(),
+            bbh,
+            sbh,
+            rng_orbit=np.random.default_rng(1),
+            rng_spin=np.random.default_rng(2),
+        )
+
+        self.assertTrue(np.isfinite(bbh.bsi_timescale_s[0]))
+        self.assertEqual(bbh.flags.bsi_event_flag[0], 1)
+        self.assertGreaterEqual(bbh.bsi_weak_count[0], 1)
+
+    def test_gas_bsi_evolves_smoothly_before_scheduled_event(
+        self,
+    ) -> None:
+        bbh = self._near_merger_binary(sma_factor=1.0e5)
+        bbh.bsi_timescale_s[:] = [0.1 * const.Myr]
+        agn = AGN_properties(M_SMBH_msun=1.0e6, lifetime_myr=1.0)
+
+        gen_evolve.make_generation(
+            self._evol_params(),
+            ModelConfig(
+                model_name="gas-bsi-jump-test",
+                gas_mode="with_gas",
+                bsi_enabled=True,
+            ),
+            agn,
+            _disk(),
+            bbh,
+            Single_BH_properties(0),
+            rng_orbit=np.random.default_rng(1),
+            rng_spin=np.random.default_rng(2),
+        )
+
+        self.assertEqual(bbh.flags.bsi_event_flag[0], 1)
+        self.assertEqual(bbh.flags.merger_flag[0], 1)
+        event_time_s = 0.1 * const.Myr
+        pre_event_indices = np.flatnonzero(
+            (bbh.track_time_s > 0.0) & (bbh.track_time_s < event_time_s)
+        )
+        self.assertGreater(pre_event_indices.size, 0)
+        event_indices = np.flatnonzero(np.isclose(bbh.track_time_s, event_time_s))
+        self.assertGreaterEqual(event_indices.size, 1)
+        pre_event_idx = pre_event_indices[-1]
+        bsi_event_idx = event_indices[0]
+        self.assertLess(bbh.track_sma_cm[pre_event_idx], bbh.track_sma_cm[0])
+        self.assertLess(
+            bbh.track_sma_cm[bsi_event_idx],
+            bbh.track_sma_cm[pre_event_idx],
+        )
+        self.assertGreater(
+            bbh.track_ecc[bsi_event_idx],
+            bbh.track_ecc[pre_event_idx],
+        )
+
     def test_gw_evolution_stops_at_agn_lifetime_without_huge_delay(self) -> None:
         bbh = self._near_merger_binary(sma_factor=1.0e5)
         agn = AGN_properties(M_SMBH_msun=1.0e6, lifetime_myr=1.0e-9)
@@ -480,6 +648,8 @@ class TestEvolutionProcess(TestCase):
         )
         self.assertLessEqual(bbh.t_del_s[0], duty_cycle_s)
         np.testing.assert_allclose(outcome.evolution_timeline.end_s, [duty_cycle_s])
+        self.assertLessEqual(bbh.track_time_s.size, 3)
+        np.testing.assert_allclose(bbh.track_time_s[-1], duty_cycle_s)
 
     def test_initial_nonphysical_binary_stops_before_integration(self) -> None:
         bbh = self._near_merger_binary()
@@ -527,15 +697,14 @@ class TestEvolutionProcess(TestCase):
             StopReasons.STOP_INITIAL_BINARY_TOO_TIGHT,
         )
 
-    def test_bsi_ionization_stops_binary_during_evolution(self) -> None:
+    def test_bsi_perturbation_does_not_stop_reduced_bsi_evolution(self) -> None:
         bbh = self._near_merger_binary()
         bbh.bsi_timescale_s[:] = [0.0]
-        bbh.flags.bsi_ionization_flag[:] = [1]
 
         gen_evolve.make_generation(
             self._evol_params(),
             ModelConfig(
-                model_name="bsi-stop-test",
+                model_name="bsi-weak-only-test",
                 gas_mode="without_gas",
                 bsi_enabled=True,
             ),
@@ -547,13 +716,9 @@ class TestEvolutionProcess(TestCase):
             rng_spin=np.random.default_rng(2),
         )
 
-        self.assertEqual(bbh.t_del_s[0], 0.0)
-        self.assertEqual(bbh.flags.merger_flag[0], 0)
+        self.assertGreater(bbh.t_del_s[0], 0.0)
         self.assertEqual(bbh.flags.bsi_event_flag[0], 1)
-        self.assertEqual(
-            bbh.flags.stop_reason_flag[0],
-            StopReasons.STOP_BSI_IONIZATION,
-        )
+        self.assertGreaterEqual(bbh.bsi_weak_count[0], 1)
 
     def test_recoil_escape_stops_hierarchical_recycling(self) -> None:
         bbh = BBH_properties(1)

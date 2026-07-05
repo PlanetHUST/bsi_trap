@@ -5,7 +5,6 @@ from bsi_trap.classes.models import (
     BBHEvolverParams,
     BBH_properties,
     AGN_properties,
-    BBH_flags,
 )
 import bsi_trap.constant.constant as const
 from bsi_trap.constant.stop_reason import StopReasons
@@ -13,7 +12,7 @@ from bsi_trap.evolve import bsi
 from bsi_trap.evolve import numeric
 from bsi_trap.evolve import physical_quantity as pq
 from bsi_trap.evolve import stop_conditions as stop_cond
-from bsi_trap.evolve.tracks import append_bbh_track
+from bsi_trap.evolve.tracks import DecimatedTrackRecorder, append_bbh_track
 
 
 def ode_gw_only(Evolparams, m1, m2, a, e):
@@ -66,38 +65,37 @@ def evolve_gw_only(
 
     # Initialize
     r_th = pq.threshold_radius(m1, m2)
-    h = 0.01 * t_est
+    h = Evolparams.gw_initial_step_fraction * t_est
     t_delay_s = 0.0
     ecc10 = 0.0
     ecc0p1 = 0.0
-    track_time_s = [float(t_ini_s)]
-    track_sma_cm = [float(a)]
-    track_ecc = [float(e)]
-
-    # # Check if binary can reach migration trap.
-    # if not np.isfinite(t_ini_s) or t_ini_s > duty_cycle_s:
-    #     return stop_cond._stop_for_trap_not_reached(bbh, i, flags, t_ini_s)
+    track_recorder = DecimatedTrackRecorder(
+        start_time_s=t_ini_s,
+        start_sma_cm=a,
+        start_ecc=e,
+        stop_time_s=time_limit_s,
+        max_smooth_points=Evolparams.track_max_smooth_points,
+    )
 
     flags.trap_reached_flag[i] = 1
 
-    # # Check if already very close to merger
-    # if (a - r_th) / r_th < 1e-1:
-    #     flags.merger_flag[i] = 0
-    #     flags.stop_reason_flag[i] = const.STOP_INITIAL_BINARY_TOO_TIGHT
-    #     bbh.ecc10[i] = np.nan  # Store nan since 10 Hz not reached
-    #     bbh.ecc0p1[i] = np.nan  # Store nan since 10 Hz not reached
-    #     return bbh, t_delay_s, flags
-
     # Store initial state
-    freq_gw = 1.0 / np.pi * np.sqrt(const.G * (m1 + m2) / a**3)
+    freq_gw = pq.frequency_from_sma(m1, m2, a)
 
     # Initialize tracking variables
     reached_10hz = False
     reached_0p1hz = False
     loop_num = 0
+    max_loops = Evolparams.max_evolution_loops
+    if freq_gw >= Evolparams.eccentricity_probe_low_hz:
+        ecc0p1 = float(e)
+        reached_0p1hz = True
+    if freq_gw >= Evolparams.eccentricity_probe_high_hz:
+        ecc10 = float(e)
+        reached_10hz = True
 
     # Evolution loop
-    while (a - r_th) / r_th > 1e-1:
+    while (a - r_th) / r_th > Evolparams.merger_boundary_fraction:
         if stop_cond._stop_for_walltime(flags, i):
             break
 
@@ -134,9 +132,12 @@ def evolve_gw_only(
                         bsi_active=True,
                     )
                     if bbh.bsi_applied_flag[i] != was_applied:
-                        track_time_s.append(float(t_ini_s + t_delay_s))
-                        track_sma_cm.append(float(a))
-                        track_ecc.append(float(e))
+                        track_recorder.record(
+                            t_ini_s + t_delay_s,
+                            a,
+                            e,
+                            force=True,
+                        )
                     if bsi_stop_reason is not None:
                         flags.merger_flag[i] = 0
                         flags.continue_ng_flag[i] = 0
@@ -145,27 +146,27 @@ def evolve_gw_only(
                 else:
                     smooth_step_limit_s = min(smooth_step_limit_s, time_to_bsi_s)
 
-        freq_gw = 1.0 / np.pi * np.sqrt(const.G * (m1 + m2) / a**3)
+        freq_gw = pq.frequency_from_sma(m1, m2, a)
         loop_num += 1
+
+        if not reached_0p1hz and freq_gw >= Evolparams.eccentricity_probe_low_hz:
+            ecc0p1 = float(e)
+            reached_0p1hz = True
+        if not reached_10hz and freq_gw >= Evolparams.eccentricity_probe_high_hz:
+            ecc10 = float(e)
+            reached_10hz = True
 
         flags.continue_ng_flag[i] = 1
 
-        # Check if we've passed 10 Hz
-        if not reached_10hz and freq_gw >= 10.0:
-            # Compute eccentricity at exactly 10 Hz
-            ecc10 = pq.compute_eccentricity_at_frequency(m1, m2, a, e, target_freq=10.0)
-            reached_10hz = True
-
-        # Check if we've passed 0.1 Hz
-        if not reached_0p1hz and freq_gw >= 0.1:
-            # Compute eccentricity at exactly 10 Hz
-            ecc0p1 = pq.compute_eccentricity_at_frequency(m1, m2, a, e, target_freq=0.1)
-            reached_0p1hz = True
-
         def record_smooth_state(elapsed_s, sma_cm, eccentricity):
-            track_time_s.append(float(t_ini_s + t_delay_s + elapsed_s))
-            track_sma_cm.append(float(sma_cm))
-            track_ecc.append(float(eccentricity))
+            track_recorder.record(
+                t_ini_s + t_delay_s + elapsed_s,
+                sma_cm,
+                eccentricity,
+            )
+
+        previous_a = a
+        previous_e = e
 
         # Evolve with GW only
         a_new, e_new, h = numeric.para_evo(
@@ -187,6 +188,34 @@ def evolve_gw_only(
             stop_cond.stop_for_invalid_step(flags, i)
             break
 
+        if not reached_0p1hz:
+            eccentricity_at_0p1 = pq.compute_eccentricity_at_frequency(
+                m1,
+                m2,
+                a_new,
+                e_new,
+                target_freq=Evolparams.eccentricity_probe_low_hz,
+                previous_a=previous_a,
+                previous_e=previous_e,
+            )
+            if np.isfinite(eccentricity_at_0p1):
+                ecc0p1 = eccentricity_at_0p1
+                reached_0p1hz = True
+
+        if not reached_10hz:
+            eccentricity_at_10 = pq.compute_eccentricity_at_frequency(
+                m1,
+                m2,
+                a_new,
+                e_new,
+                target_freq=Evolparams.eccentricity_probe_high_hz,
+                previous_a=previous_a,
+                previous_e=previous_e,
+            )
+            if np.isfinite(eccentricity_at_10):
+                ecc10 = eccentricity_at_10
+                reached_10hz = True
+
         a, e = a_new, e_new
 
         # BSI is applied while the current orbital state is live.  The BSI
@@ -198,6 +227,8 @@ def evolve_gw_only(
             and was_applied == 0
             and t_delay_s + t_ini_s <= duty_cycle_s
         )
+        previous_a = a
+        previous_e = e
         a, e, m1, m2, bsi_stop_reason = bsi.apply_scheduled_bsi_step(
             Evolparams,
             bbh,
@@ -212,9 +243,38 @@ def evolve_gw_only(
             bsi_active=bsi_active,
         )
         if bbh.bsi_applied_flag[i] != was_applied:
-            track_time_s.append(float(t_ini_s + bbh.bsi_timescale_s[i]))
-            track_sma_cm.append(float(a))
-            track_ecc.append(float(e))
+            track_recorder.record(
+                t_ini_s + bbh.bsi_timescale_s[i],
+                a,
+                e,
+                force=True,
+            )
+            if not reached_0p1hz:
+                eccentricity_at_0p1 = pq.compute_eccentricity_at_frequency(
+                    m1,
+                    m2,
+                    a,
+                    e,
+                    target_freq=Evolparams.eccentricity_probe_low_hz,
+                    previous_a=previous_a,
+                    previous_e=previous_e,
+                )
+                if np.isfinite(eccentricity_at_0p1):
+                    ecc0p1 = eccentricity_at_0p1
+                    reached_0p1hz = True
+            if not reached_10hz:
+                eccentricity_at_10 = pq.compute_eccentricity_at_frequency(
+                    m1,
+                    m2,
+                    a,
+                    e,
+                    target_freq=Evolparams.eccentricity_probe_high_hz,
+                    previous_a=previous_a,
+                    previous_e=previous_e,
+                )
+                if np.isfinite(eccentricity_at_10):
+                    ecc10 = eccentricity_at_10
+                    reached_10hz = True
 
         if bsi_stop_reason is not None:
             flags.merger_flag[i] = 0
@@ -224,7 +284,7 @@ def evolve_gw_only(
             break
 
         r_th = pq.threshold_radius(m1, m2)
-        freq_gw = 1.0 / np.pi * np.sqrt(const.G * (m1 + m2) / a**3)
+        freq_gw = pq.frequency_from_sma(m1, m2, a)
         t_delay_s += h
 
         # Check time limits
@@ -235,7 +295,7 @@ def evolve_gw_only(
             break
 
         # Check if merged
-        if (a - r_th) / r_th <= 1e-1:
+        if (a - r_th) / r_th <= Evolparams.merger_boundary_fraction:
             flags.merger_flag[i] = 1
             break
 
@@ -245,13 +305,16 @@ def evolve_gw_only(
             flags.stop_reason_flag[i] = time_limit_reason
             break
 
-        if loop_num >= 1e6:
+        if loop_num >= max_loops:
             print(f"Warning: Max loops reached for binary {i}")
             flags.merger_flag[i] = 0
             flags.stop_reason_flag[i] = const.STOP_INTEGRATION_LIMIT
             break
 
     # Store results
+    final_time_s = float(t_ini_s + t_delay_s)
+    track_recorder.record_final(final_time_s, a, e)
+
     bbh.sma_cm[i] = a
     bbh.ecc[i] = e
     bbh.ecc10[i] = ecc10
@@ -259,9 +322,9 @@ def evolve_gw_only(
     append_bbh_track(
         bbh,
         binary_idx=i,
-        time_s=track_time_s,
-        sma_cm=track_sma_cm,
-        ecc=track_ecc,
+        time_s=track_recorder.time_s,
+        sma_cm=track_recorder.sma_cm,
+        ecc=track_recorder.ecc,
     )
 
     return t_delay_s

@@ -20,12 +20,17 @@ from bsi_trap.classes.models import (
 from bsi_trap.config.model_config import ModelConfig
 from bsi_trap.evolve.gen_evolve import GenerationEvolutionResult
 from bsi_trap.evolve.timeline import BSI_Timeline, EvolutionTimeline, PairingTimeline
-from bsi_trap.hdf5_load.timeline_catalog import read_timeline_catalog
+from bsi_trap.hdf5_load.timeline_catalog import TimelineCatalog, read_timeline_catalog
 from bsi_trap.hierarchical.generations import GenerationRecord, HierarchicalRun
 from bsi_trap.hierarchical.remnants import HierarchicalMergerLedger
 from bsi_trap.initialization.trap_population import TrapPopulation
 from bsi_trap.parallel_compute.single_work import process_single_sample_worker
 from bsi_trap.parallel_compute.state import SimulationTask
+from bsi_trap.plots.figures_def import available_figures, resolve_figure_function
+from bsi_trap.plots.timeline_evolution import (
+    _bbh_energy_angular_momentum_coordinates,
+    _population_curves,
+)
 from bsi_trap.storage.contract import HDF5Contract
 from bsi_trap.storage.payload import (
     GenerationState,
@@ -126,6 +131,60 @@ def _sample_state_with_lifetime(lifetime_myr: float) -> GenerationState:
 
 
 class TestWorkflow(TestCase):
+    def test_parameter_timeline_maps_orbit_to_energy_angular_momentum_plane(
+        self,
+    ) -> None:
+        j_over_jc, y_log_a = _bbh_energy_angular_momentum_coordinates(
+            np.array([1.0e-3, 1.0e-2]) * 3.08568e18,
+            np.array([0.0, np.sqrt(1.0 - 0.01)]),
+        )
+
+        np.testing.assert_allclose(j_over_jc, [1.0, 0.1])
+        np.testing.assert_allclose(y_log_a, [0.0, 1.0])
+
+    def test_figure_registry_resolves_current_plot_functions(self) -> None:
+        self.assertIn("bbh_sbh_population_timeline", available_figures("timeline"))
+        self.assertTrue(
+            callable(resolve_figure_function("bbh_sbh_population_timeline"))
+        )
+        self.assertTrue(callable(resolve_figure_function("bbh_parameter_timeline")))
+
+    def test_population_curve_removes_bbh_at_merger(self) -> None:
+        catalog = TimelineCatalog(
+            trap_reach_s=np.array([1.0, 2.0, 3.0, 4.0]),
+            trap_reach_sample=np.zeros(4, dtype=np.int64),
+            pair_formation_s=np.array([5.0]),
+            pair_sample=np.zeros(1, dtype=np.int64),
+            merger_s=np.array([8.0]),
+            merger_sample=np.zeros(1, dtype=np.int64),
+            start_s=np.array([5.0]),
+            end_s=np.array([8.0]),
+            sma_initial_cm=np.array([1.2e11]),
+            sma_final_cm=np.array([1.0e11]),
+            ecc_initial=np.array([0.2]),
+            ecc_final=np.array([0.1]),
+            remnant_mass_msun=np.array([28.0]),
+            kick_velocity_cgs=np.array([0.0]),
+            generation=np.array([1], dtype=np.int64),
+            sample_index=np.array([0], dtype=np.int64),
+            duty_cycle_s=np.array([10.0]),
+            merged=np.array([True]),
+            track_binary_idx=np.empty(0, dtype=np.int64),
+            track_time_s=np.empty(0),
+            track_sma_cm=np.empty(0),
+            track_ecc=np.empty(0),
+        )
+
+        time_myr, single_count, binary_count = _population_curves(catalog)
+
+        expected_time_myr = (
+            np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 8.0, 10.0])
+            / 3.1557600e13
+        )
+        np.testing.assert_allclose(time_myr, expected_time_myr)
+        np.testing.assert_array_equal(single_count, [0, 1, 2, 3, 4, 2, 2, 2])
+        np.testing.assert_array_equal(binary_count, [0, 0, 0, 0, 0, 1, 0, 0])
+
     def test_simulate_command_passes_evolution_model_options(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -180,6 +239,7 @@ class TestWorkflow(TestCase):
     def test_generation_data_writes_hdf5_contract(self) -> None:
         config = ModelConfig(model_name="workflow-test")
         state = _sample_state()
+        state.population.binaries.bsi_timescale_s[:] = [2.0]
 
         with tempfile.TemporaryDirectory() as tmp:
             contract = HDF5Contract(root_dir=Path(tmp))
@@ -223,6 +283,9 @@ class TestWorkflow(TestCase):
                 np.testing.assert_allclose(
                     h5f[f"{contract.group_timescales}/tmerg_myr"][()],
                     np.array([13.0]) / 3.1557600e13,
+                )
+                self.assertTrue(
+                    np.isnan(h5f[f"{contract.group_timescales}/t_bsi_myr"][0])
                 )
                 np.testing.assert_allclose(
                     h5f[f"{contract.group_bbh_tracks}/sma_cm"][()],
@@ -479,13 +542,13 @@ class TestWorkflow(TestCase):
             figure_names = {
                 Path(figure_path).name for figure_path in manifest_data["figures"]
             }
-            self.assertIn("trap_population_counts.png", figure_names)
-            self.assertIn("bbh_mass_distribution.png", figure_names)
-            self.assertIn("bbh_event_times.png", figure_names)
-            self.assertIn("bbh_evolution_delays.png", figure_names)
-            self.assertIn("trap_population_timeline.png", figure_names)
-            self.assertIn("bbh_parameter_timeline.png", figure_names)
-            self.assertIn("merger_parameter_histograms.png", figure_names)
+            self.assertEqual(
+                figure_names,
+                {
+                    "bbh_sbh_population_timeline.png",
+                    "bbh_parameter_timeline.png",
+                },
+            )
             for figure_path in manifest_data["figures"]:
                 self.assertTrue(Path(figure_path).exists())
                 self.assertGreater(Path(figure_path).stat().st_size, 0)

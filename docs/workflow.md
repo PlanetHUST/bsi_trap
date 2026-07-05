@@ -1,0 +1,232 @@
+# Current Workflow Status
+
+This note summarizes the project logic as it stands now.  It is meant to be a
+status document: what the current workflow actually does, why this structure is
+useful, what tasks remain, and which caveats matter when interpreting outputs.
+
+## Project Logic Now
+
+The current project is a reduced AGN migration-trap BBH workflow.  One sample
+is organized as:
+
+```text
+SMBH mass + ModelConfig + seed
+    -> AGN disk and torque profile
+    -> embedded BH reservoir
+    -> mass-dependent migration toward trap targets
+    -> local finite pair-up into BBHs plus unpaired trap singles
+    -> BBH orbital/spin initialization
+    -> BBH gas/GW evolution with optional weak BSI perturbations
+    -> merger/remnant/kick/retention processing
+    -> per-generation HDF5 output and compact timeline plots
+```
+
+The current code is not a single global event loop over all trap objects.
+Instead, it has a clear staged contract:
+
+- initialization builds the first trap population;
+- pairing records when BBHs form;
+- BBH evolution evolves each binary from its formation time;
+- BSI is a scheduled weak perturbation applied inside the binary evolution;
+- timelines record event times and outcomes;
+- storage writes the final state plus event ledgers.
+
+The main runtime boundary is:
+
+```text
+src/workflow/sample_run.py::run_physics_sample()
+```
+
+The main physical data boundary is:
+
+```text
+TrapPopulation
+    embedded_bh
+    binaries
+    singles
+    pairing_timeline
+```
+
+The main evolution output boundary is:
+
+```text
+EvolutionTimeline
+    start_s
+    delay_s
+    end_s
+    merger_s
+    merged
+    stop_reason
+    bsi_timeline
+```
+
+Scenario-level choices live in `ModelConfig`, while BBH integration policy lives
+in `BBHEvolverParams`.  The latter now owns the reduced-model numerical knobs
+that used to be scattered through the gas/GW evolution code:
+
+- initial timestep fractions for GW-only and gas-assisted integration;
+- the merger-radius factor and dimensionless merger-boundary tolerance;
+- the maximum integration-loop cap;
+- accepted-track decimation for `bbh_tracks`;
+- the two GW frequencies used for `ecc0p1` and `ecc10` diagnostics.
+
+Changing those values should therefore happen through the evolver parameter
+object rather than by editing `gw.py`, `gas_harden.py`, or `gen_evolve.py`.
+
+## Event Ordering
+
+The initialization timeline should be read as:
+
+```text
+BH formation in disk
+    -> migration to a trap target
+    -> reached trap single reservoir
+    -> local encounter with another eligible single
+    -> gas-assisted pair-up delay
+    -> BBH formation
+```
+
+The useful timing relation is:
+
+```text
+t_BBH = t_encounter + t_pair
+```
+
+where `t_encounter` is the absolute encounter event time stored by the pairing
+ledger.  Conceptually, the encounter is sampled after the active reservoir
+boundary set by the later arrival and the current trap clock.  The encounter
+time is therefore not optional bookkeeping: the pair cannot begin gas-assisted
+completion before the two objects have become an eligible local pair.
+
+After BBH formation, the binary evolves independently through the current
+gas/GW/BSI routines until it merges or reaches a stop condition.  If a merger
+occurs, the remnant processor computes remnant mass, spin, recoil, retention,
+escape, and whether the retained remnant can seed a later generation.
+
+## Current Advantages
+
+The main advantage of the current structure is separation of responsibilities.
+The project no longer mixes physical updates, event bookkeeping, and HDF5
+payload layout in the same object.
+
+The strongest parts of the current workflow are:
+
+- `TrapContext` is geometry-only; migration and pairing policy live elsewhere.
+- Pairing keeps a real event clock with arrival, encounter, pair delay, and BBH
+  formation time.
+- The local pair-up model uses persistent sampled trap radii and local
+  eligibility rather than a fully mixed one-zone reservoir.
+- BBH evolution stores accepted trajectory states in `bbh_tracks`, so plots can
+  show real evolution paths instead of only initial/final points.
+- BBH evolution policy is centralized in `BBHEvolverParams`, reducing hidden
+  constants in the gas/GW hardening routines.
+- BSI now has a simple and explicit responsibility split: the evolution module
+  mutates the binary, while `BSI_Timeline` records the applied event time.
+- HDF5 output is schema-driven through `storage/payload.py` and
+  `storage/schemas.py`.
+- Plotting is now focused on high-density diagnostics:
+  `bbh_sbh_population_timeline.png` and `bbh_parameter_timeline.png`.
+
+This makes the current code easier to extend toward a population-level trap
+event loop without rewriting initialization, storage, or plotting from scratch.
+
+## Current Tasks
+
+The next tasks should be ordered by physical importance and by how much they
+change the workflow contract.
+
+1. Build a true population-level trap event loop.
+
+   The current code initializes a trap population, then evolves BBHs
+   generation-by-generation.  The next framework step is a shared clock:
+
+   ```text
+   inject newly reached singles
+       -> pair eligible singles/remnants
+       -> evolve active BBHs to the next event boundary
+       -> apply scheduled weak BSI
+       -> process mergers and retained/escaped remnants
+       -> return retained singles/remnants to the reservoir
+       -> record population snapshots until AGN duty-cycle end
+   ```
+
+2. Make hierarchical remnant recycling part of the same live reservoir.
+
+   Retained merger remnants currently seed later generations through a staged
+   generation path.  A fuller model should mix retained remnants with the
+   evolving single-BH reservoir on the same clock.
+
+3. Improve the BSI physics kernel.
+
+   The current BSI implementation is weak perturbation only.  It changes
+   eccentricity, semimajor axis, and spin tilts, but it does not model
+   ionization, ejection, exchange, or a calibrated few-body outcome
+   distribution.
+
+4. Calibrate pair-up and BSI rates.
+
+   The current local model is useful as a reduced phase-averaged prescription,
+   but the rate normalization and outcome distributions still need physical
+   calibration against the intended literature model or a controlled scattering
+   calculation.
+
+5. Extend diagnostics around population balance.
+
+   The new compact plot tracks active single BHs and BBHs.  Future diagnostics
+   should also separate first-generation BBHs, hierarchical BBHs, retained
+   remnants, escaped remnants, and stop reasons when the live population loop
+   exists.
+
+## Caveats
+
+The current workflow is scientifically useful as a structured reduced model,
+but it should not be read as the final AGN trap population simulation.
+
+Important caveats:
+
+- There is not yet a full mixed single-BH/BBH reservoir evolved on one global
+  event clock.
+- Pair-up is local and event-driven, but still phase-averaged.  It is not a
+  resolved N-body calculation.
+- BSI is weak-only.  Ionization, ejection, and exchange are intentionally not
+  represented in the current reduced evolution.
+- `t_bsi_myr` in HDF5 means an applied BSI event time.  A scheduled but
+  unapplied BSI delay remains in `bbh_properties/bsi_timescale_s`.
+- Timeline plots are clipped at the AGN duty cycle.  Events beyond that
+  boundary are treated as physically irrelevant for the current run.
+- BBH trajectory plots reflect stored accepted integrator states.  Sparse tracks
+  usually mean sparse accepted states, not necessarily a plotting failure.
+- Current compact plots are diagnostics, not final population-inference plots.
+- Warning-free tests are part of the project contract because previous issues
+  involved import side effects and plotting cache warnings, not only physics
+  equations.
+
+## Validation Contract
+
+Use these commands after workflow, storage, evolution, or plotting edits:
+
+```bash
+env PYTHONPATH=src python -m compileall -q src tests
+```
+
+```bash
+env MPLCONFIGDIR=/tmp/matplotlib PYTHONPATH=src \
+  python -W error -m unittest discover -s tests -v
+```
+
+For quick plotting checks after a simulation:
+
+```bash
+env MPLCONFIGDIR=/tmp/matplotlib PYTHONPATH=src \
+  python -m cli.main plot \
+  --summary-path output/simulation_summary.json \
+  --output-dir output/plots
+```
+
+Expected compact plot outputs are:
+
+```text
+bbh_sbh_population_timeline.png
+bbh_parameter_timeline.png
+plot_manifest.json
+```

@@ -101,9 +101,6 @@ def flag_data(bbh: BBH_properties) -> dict[str, np.ndarray]:
         "continue_ng_flag": flags.continue_ng_flag,
         "hard": flags.hard,
         "bsi_event_flag": flags.bsi_event_flag,
-        "bsi_exchange_flag": flags.bsi_exchange_flag,
-        "bsi_ionization_flag": flags.bsi_ionization_flag,
-        "bsi_ejection_flag": flags.bsi_ejection_flag,
         "trap_reached_flag": flags.trap_reached_flag,
         "stop_reason_flag": flags.stop_reason_flag,
     }
@@ -114,6 +111,12 @@ def time_data(
     evolution_timeline: EvolutionTimeline,
 ) -> dict[str, np.ndarray]:
     num = bbh.num
+    bsi_event_time_s = np.full(num, np.nan, dtype=float)
+    bsi_delay_s = np.asarray(bbh.bsi_timescale_s, dtype=float)
+    bsi_applied = (
+        np.asarray(bbh.flags.bsi_event_flag, dtype=int) != 0
+    ) & np.isfinite(bsi_delay_s) & (bsi_delay_s >= 0.0)
+    bsi_event_time_s[bsi_applied] = bbh.t_ini_s[bsi_applied] + bsi_delay_s[bsi_applied]
     return {
         "tform_myr": _nan(num),
         "trel_myr": _nan(num),
@@ -122,7 +125,7 @@ def time_data(
         "tini_myr": _as_myr(bbh.t_ini_s),
         "tdel_myr": _as_myr(bbh.t_del_s),
         "tmerg_myr": _as_myr(evolution_timeline.merger_s),
-        "t_bsi_myr": _as_myr(bbh.t_ini_s + bbh.bsi_timescale_s),
+        "t_bsi_myr": _as_myr(bsi_event_time_s),
     }
 
 

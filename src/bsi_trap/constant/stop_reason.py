@@ -31,17 +31,12 @@ class StopReasons:
     STOP_GW_ESCAPE = 9
     STOP_DISK_RETENTION = 10
 
-    # binary-single interaction outcome
-    STOP_BSI_IONIZATION = 16
-    STOP_BSI_EJECTION = 17
-
 
 class StopReasonType:
     NONE = "none"
     TRAP_POPULATION = "trap_population"
     BINARY_EVOLUTION = "binary_evolution"
     HIERARCHICAL_REMNANT = "hierarchical_remnant"
-    BSI = "bsi"
     UNKNOWN = "unknown"
 
 
@@ -149,18 +144,6 @@ STOP_REASON_INFO: dict[int, StopReasonInfo] = {
         "STOP_DISK_RETENTION",
         StopReasonType.HIERARCHICAL_REMNANT,
         "The merger remnant remains bound to the disk/trap environment.",
-    ),
-    StopReasons.STOP_BSI_IONIZATION: StopReasonInfo(
-        StopReasons.STOP_BSI_IONIZATION,
-        "STOP_BSI_IONIZATION",
-        StopReasonType.BSI,
-        "A binary-single interaction ionized the BBH.",
-    ),
-    StopReasons.STOP_BSI_EJECTION: StopReasonInfo(
-        StopReasons.STOP_BSI_EJECTION,
-        "STOP_BSI_EJECTION",
-        StopReasonType.BSI,
-        "A binary-single interaction ejected the BBH.",
     ),
 }
 

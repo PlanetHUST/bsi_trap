@@ -1,5 +1,9 @@
-docs/
 .agents/
 .codex/
 input/
 report/
+output/
+temp/
+__pycache__/
+*.py[cod]
+pyrightconfig.json

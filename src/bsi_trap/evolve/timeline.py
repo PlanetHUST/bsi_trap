@@ -11,7 +11,6 @@ FloatArray = npt.NDArray[np.float64]
 IndexArray = npt.NDArray[np.intp]
 BoolArray = npt.NDArray[np.bool_]
 IntArray = npt.NDArray[np.int64]
-StringArray = npt.NDArray[np.str_]
 
 
 @dataclass(frozen=True)
@@ -75,17 +74,15 @@ class PairingTimeline:
 
 @dataclass(frozen=True)
 class BSI_Timeline:
-    """Resolved binary-single interaction events with absolute event times."""
+    """Resolved weak binary-single interaction events with absolute times."""
 
     binary_idx: IndexArray
     event_s: FloatArray
-    event_type: StringArray
 
     def __post_init__(self) -> None:
         expected_shape = self.event_s.shape
-        for name in ("binary_idx", "event_type"):
-            if getattr(self, name).shape != expected_shape:
-                raise ValueError("BSI_Timeline arrays must have matching shapes")
+        if self.binary_idx.shape != expected_shape:
+            raise ValueError("BSI_Timeline arrays must have matching shapes")
         if len(expected_shape) != 1:
             raise ValueError("BSI_Timeline arrays must be one-dimensional")
         if np.any(~np.isfinite(self.event_s)) or np.any(self.event_s < 0.0):
@@ -96,7 +93,6 @@ class BSI_Timeline:
         return cls(
             binary_idx=np.empty(0, dtype=np.intp),
             event_s=np.empty(0, dtype=float),
-            event_type=np.empty(0, dtype="<U16"),
         )
 
     @property
@@ -105,11 +101,7 @@ class BSI_Timeline:
 
     @property
     def weak_perturbation_s(self) -> FloatArray:
-        return self.event_s[self.event_type == "weak"]
-
-    @property
-    def strong_perturbation_s(self) -> FloatArray:
-        return self.event_s[self.event_type != "weak"]
+        return self.event_s
 
 
 @dataclass(frozen=True)
