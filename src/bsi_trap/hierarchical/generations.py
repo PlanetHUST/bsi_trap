@@ -13,9 +13,7 @@ from bsi_trap.classes.models import (
 )
 from bsi_trap.config.model_config import ModelConfig
 from bsi_trap.constant.constant import Myr
-from bsi_trap.evolve.gen_evolve import GenerationEvolutionResult, make_generation
-from bsi_trap.evolve.pairing import construct_pairing_up_timeline
-from bsi_trap.evolve.timeline import FloatArray, IntArray
+from bsi_trap.evolve.gen_evolve import EvolutionResult, make_generation
 from bsi_trap.evolve.trap_context import build_trap_context
 from bsi_trap.initialization.bbh_parameters import BBH_params_initialize
 from bsi_trap.initialization.trap_population import (
@@ -23,13 +21,15 @@ from bsi_trap.initialization.trap_population import (
     init_bbh,
     init_sbh,
 )
+from bsi_trap.timeline.models import FloatArray, IntArray
+from bsi_trap.timeline.pairing import construct_pairing_up_timeline
 
 
 @dataclass(frozen=True)
 class GenerationRecord:
     generation: int
     population: TrapPopulation
-    outcome: GenerationEvolutionResult
+    outcome: EvolutionResult
 
 
 @dataclass(frozen=True)
@@ -204,11 +204,14 @@ def _build_population_from_single_reservoir(
     rng_spin: np.random.Generator,
     max_pairing_events: int | None,
 ) -> TrapPopulation:
+
     embedded_bh = _build_embedded_reservoir(source_singles, disk)
     end_time_s = agn.lifetime_myr * Myr
     reached_mask = np.isfinite(embedded_bh.t_reach_s) & (
         embedded_bh.t_reach_s < end_time_s
     )
+
+    # build geometry trap context
     trap_context = build_trap_context(disk, model_config)
     embedded_bh.trap_width_cm = trap_context.width_cm
 
@@ -223,14 +226,15 @@ def _build_population_from_single_reservoir(
         rng_pair_up=rng_pair_up,
         max_events=max_pairing_events,
     )
-    binaries = init_bbh(embedded_bh)
-    singles = init_sbh(embedded_bh)
 
-    if binaries.num > 0:
+    binaries_ite = init_bbh(embedded_bh)
+    singles_ite = init_sbh(embedded_bh)
+
+    if binaries_ite.num > 0:
         BBH_params_initialize(
             agn=agn,
             disk=disk,
-            bbh=binaries,
+            bbh=binaries_ite,
             rng_orbit=rng_orbit,
             rng_spin=rng_spin,
             model_config=model_config,
@@ -239,8 +243,8 @@ def _build_population_from_single_reservoir(
 
     return TrapPopulation(
         embedded_bh=embedded_bh,
-        binaries=binaries,
-        singles=singles,
+        binaries=binaries_ite,
+        singles=singles_ite,
         pairing_timeline=pairing_timeline,
     )
 
@@ -256,12 +260,15 @@ def evolve_hierarchical_generations(
     rng_orbit: np.random.Generator,
     rng_spin: np.random.Generator,
 ) -> HierarchicalRun:
+
     end_time_s = agn.lifetime_myr * Myr
+
     live_singles = _singles_from_embedded_arrivals(
         initial_population.embedded_bh,
         end_time_s,
     )
 
+    # list of record -> records
     records: list[GenerationRecord] = []
     event_index = 1
 
@@ -276,6 +283,7 @@ def evolve_hierarchical_generations(
             rng_spin=rng_spin,
             max_pairing_events=1,
         )
+
         outcome = make_generation(
             Evolparams=Evolparams,
             model_config=model_config,
@@ -285,12 +293,14 @@ def evolve_hierarchical_generations(
             sbh=population.singles,
             rng_orbit=rng_orbit,
         )
+
         record = GenerationRecord(
             generation=event_index,
             population=population,
             outcome=outcome,
         )
 
+        # break condition 1: no active binaries
         if population.binaries.num == 0:
             if not records:
                 records.append(record)
@@ -302,9 +312,12 @@ def evolve_hierarchical_generations(
             population.singles,
             outcome.hierarchical_mergers.next_generation_singles,
         )
+
+        # break condition 2: no more than 2 active single bhs
         if live_singles.num < 2:
             break
 
+        # iterating condition: next event
         event_index += 1
 
     return HierarchicalRun(records=tuple(records))

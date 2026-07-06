@@ -9,17 +9,12 @@ from bsi_trap.classes.models import (
     DiskProfile,
 )
 from bsi_trap.config.model_config import ModelConfig
-from bsi_trap.evolve.bsi import construct_bsi_timeline, schedule_bsi_events
+from bsi_trap.evolve.bsi import schedule_bsi_events
 from bsi_trap.evolve.gas_harden import evolve_gas
 from bsi_trap.evolve.gw import evolve_gw_only
-from bsi_trap.evolve.timeline import (
-    BSI_Timeline,
-    BoolArray,
-    EvolutionTimeline,
-    FloatArray,
-    IndexArray,
-    IntArray,
-)
+from bsi_trap.timeline.bsi import construct_bsi_timeline
+from bsi_trap.timeline.evolution import construct_bbh_evolution_timeline
+from bsi_trap.timeline.models import EvolutionTimeline
 from bsi_trap.evolve.tracks import finalize_bbh_tracks
 from bsi_trap.constant.stop_reason import StopReasons
 from bsi_trap.evolve import numeric
@@ -32,48 +27,13 @@ from bsi_trap.hierarchical.remnants import (
 
 
 @dataclass(frozen=True)
-class GenerationEvolutionResult:
+class EvolutionResult:
     evolution_timeline: EvolutionTimeline
     hierarchical_mergers: HierarchicalMergerLedger
 
 
-def construct_bbh_evolution_timeline(
-    bbh: BBH_properties,
-    bsi_timeline: BSI_Timeline | None = None,
-) -> EvolutionTimeline:
-    """Build the absolute-time BBH evolution outcome ledger.
+GenerationEvolutionResult = EvolutionResult
 
-    The BBH object should already contain the physical post-evolution state.
-    This function only packages times, merger flags, stop reasons, and the BSI
-    event ledger for storage/analysis.
-    """
-    if bsi_timeline is None:
-        bsi_timeline = construct_bsi_timeline(bbh)
-    if bbh.num == 0:
-        return EvolutionTimeline.empty(bsi_timeline=bsi_timeline)
-
-    binary_idx: IndexArray = np.arange(bbh.num, dtype=np.intp)
-    start_s: FloatArray = np.asarray(bbh.t_ini_s, dtype=np.float64)
-    delay_s: FloatArray = np.asarray(bbh.t_del_s, dtype=np.float64)
-    merged: BoolArray = np.asarray(bbh.flags.merger_flag != 0, dtype=bool)
-    end_s: FloatArray = np.asarray(start_s + delay_s, dtype=np.float64)
-    merger_s: FloatArray = np.full(bbh.num, np.nan, dtype=np.float64)
-    merger_s[merged] = end_s[merged]
-    stop_reason: IntArray = np.asarray(
-        bbh.flags.stop_reason_flag,
-        dtype=np.int64,
-    )
-
-    return EvolutionTimeline(
-        binary_idx=binary_idx,
-        start_s=start_s,
-        delay_s=delay_s,
-        end_s=end_s,
-        merger_s=merger_s,
-        merged=merged,
-        stop_reason=stop_reason,
-        bsi_timeline=bsi_timeline,
-    )
 
 
 def make_generation(
@@ -84,10 +44,11 @@ def make_generation(
     bbh: BBH_properties,
     sbh: Single_BH_properties,
     rng_orbit: np.random.Generator,
-) -> GenerationEvolutionResult:
+) -> EvolutionResult:
     """Evolve one committed BBH population and package its event ledgers."""
 
     if model_config.bsi_enabled:
+        # set bsi events time
         schedule_bsi_events(
             model_config=model_config,
             agn=agn,
@@ -104,17 +65,20 @@ def make_generation(
     finalize_bbh_tracks(bbh)
 
     bsi_timeline = construct_bsi_timeline(bbh)
+
     hierarchical_mergers = build_hierarchical_mergers(
         agn=agn,
         disk=disk,
         bbh=bbh,
         rng=rng_orbit,
     )
+
     evolution_timeline = construct_bbh_evolution_timeline(
         bbh,
         bsi_timeline=bsi_timeline,
     )
-    return GenerationEvolutionResult(
+
+    return EvolutionResult(
         evolution_timeline=evolution_timeline,
         hierarchical_mergers=hierarchical_mergers,
     )

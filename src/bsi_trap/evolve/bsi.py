@@ -3,7 +3,8 @@
 The important model boundary is:
 
 * ``apply_scheduled_bsi_step`` changes the mutable BBH state during evolution.
-* ``construct_bsi_timeline`` reads the recorded flags/times and builds a ledger.
+* ``bsi_trap.timeline.construct_bsi_timeline`` reads recorded flags/times and
+  builds a ledger.
 
 This keeps the physical update out of ``BSI_Timeline``.  Timelines answer
 "when did the event happen?", while this module's step function answers "what
@@ -25,11 +26,8 @@ from bsi_trap.classes.models import (
 from bsi_trap.config.model_config import ModelConfig
 from bsi_trap.constant.constant import G, Myr, msun
 from bsi_trap.evolve.trap_context import build_trap_context
-from bsi_trap.evolve.timeline import (
-    BSI_Timeline,
-    FloatArray,
-    IndexArray,
-)
+from bsi_trap.timeline.bsi import construct_bsi_timeline
+from bsi_trap.timeline.models import FloatArray
 from bsi_trap.functions.pairing_physics import (
     bbh_cross_section,
     shear_relative_velocity,
@@ -153,13 +151,25 @@ def _sample_bsi_event_time_s(
     duty_cycle_s: float,
     rng: np.random.Generator,
 ) -> float | None:
+    # sample the binary bsi event time for binary_idx
+    ####################
+    # only in avearge meaning
+
     start_s = float(bbh.t_ini_s[binary_idx])
+
+    # check
     if not np.isfinite(start_s) or start_s < 0.0 or start_s >= duty_cycle_s:
         return None
 
     target_optical_depth = float(rng.exponential(1.0))
+
     accumulated = 0.0
+
     current_s = start_s
+
+    # get next arrive single index
+    #################################
+    # next arrive means change for singel bh population
     active_count = int(np.searchsorted(single_arrival_s, current_s, side="right"))
 
     while current_s < duty_cycle_s:
@@ -168,9 +178,13 @@ def _sample_bsi_event_time_s(
             if active_count < single_arrival_s.size
             else duty_cycle_s
         )
+
+        # bsi interval terminal time
         interval_end_s = min(next_arrival_s, duty_cycle_s)
 
         if interval_end_s > current_s and active_count > 0:
+
+            # calculate bsi rate for getting bsi timeline
             rate_s_inv = _binary_single_rate_s_inv(
                 model_config,
                 agn,
@@ -179,21 +193,27 @@ def _sample_bsi_event_time_s(
                 binary_idx,
                 single_mass_msun[:active_count],
             )
+
             if rate_s_inv > 0.0:
                 interval_depth = rate_s_inv * (interval_end_s - current_s)
+
                 if accumulated + interval_depth >= target_optical_depth:
                     return float(
                         current_s + (target_optical_depth - accumulated) / rate_s_inv
                     )
                 accumulated += interval_depth
 
+        # set current time to interval terminal time
         current_s = interval_end_s
+
         while (
             active_count < single_arrival_s.size
             and single_arrival_s[active_count] <= current_s
         ):
+            # consider next active count
             active_count += 1
 
+        # break condition
         if active_count >= single_arrival_s.size and current_s >= duty_cycle_s:
             break
 
@@ -215,28 +235,32 @@ def schedule_bsi_events(
     focused tests and deterministic fixtures can force a specific event. The
     orbital perturbation itself is applied later by ``apply_scheduled_bsi_step``.
     """
-    scheduled = np.zeros(bbh.num, dtype=bool)
+    # each value means if get next bsi event time
+    scheduled_mask = np.zeros(bbh.num, dtype=bool)
 
     if bbh.num == 0 or sbh.num == 0:
-        return scheduled
+        return scheduled_mask
 
     duty_cycle_s = float(agn.lifetime_myr * Myr)
     if not np.isfinite(duty_cycle_s) or duty_cycle_s <= 0.0:
-        return scheduled
+        return scheduled_mask
 
     single_arrival_s, single_mass_msun = _active_single_population(sbh, duty_cycle_s)
     if single_arrival_s.size == 0:
-        return scheduled
+        return scheduled_mask
 
-    existing_delay_s = np.asarray(bbh.bsi_timescale_s, dtype=np.float64)
+    bbh_bsi_event_coll = np.asarray(bbh.bsi_timescale_s, dtype=np.float64)
+
     for binary_idx in range(bbh.num):
+
+        # check
         if (
-            np.isfinite(existing_delay_s[binary_idx])
-            and existing_delay_s[binary_idx] >= 0.0
+            np.isfinite(bbh_bsi_event_coll[binary_idx])
+            and bbh_bsi_event_coll[binary_idx] >= 0.0
         ):
             continue
 
-        event_s = _sample_bsi_event_time_s(
+        t_bsi_abo_s = _sample_bsi_event_time_s(
             model_config,
             agn,
             disk,
@@ -247,15 +271,21 @@ def schedule_bsi_events(
             duty_cycle_s,
             rng,
         )
-        if event_s is None:
+
+        if t_bsi_abo_s is None:
             continue
 
-        delay_s = event_s - float(bbh.t_ini_s[binary_idx])
-        if np.isfinite(delay_s) and delay_s >= 0.0 and event_s <= duty_cycle_s:
-            bbh.bsi_timescale_s[binary_idx] = delay_s
-            scheduled[binary_idx] = True
+        t_bsi_rel_s = t_bsi_abo_s - float(bbh.t_ini_s[binary_idx])
 
-    return scheduled
+        if (
+            np.isfinite(t_bsi_rel_s)
+            and t_bsi_rel_s >= 0.0
+            and t_bsi_abo_s <= duty_cycle_s
+        ):
+            bbh.bsi_timescale_s[binary_idx] = t_bsi_rel_s
+            scheduled_mask[binary_idx] = True
+
+    return scheduled_mask
 
 
 def _apply_weak_perturbation(
@@ -324,70 +354,3 @@ def apply_scheduled_bsi_step(
 
     a_after, e_after = _apply_weak_perturbation(params, bbh, i, a_cm, e)
     return a_after, e_after, m1_g, m2_g, None
-
-
-def _resolve_bsi_delay_s(
-    bbh: BBH_properties,
-    event_delay_s: np.ndarray | None,
-) -> np.ndarray | None:
-    """Return the BSI delay array used by the event ledger."""
-    if event_delay_s is not None:
-        delay_s = np.asarray(event_delay_s, dtype=float)
-    else:
-        delay_source = getattr(bbh, "bsi_timescale_s", None)
-        if delay_source is not None:
-            delay_s = np.asarray(delay_source, dtype=float)
-        elif (delay_source := getattr(bbh, "t_bsi_s", None)) is not None:
-            delay_s = np.asarray(delay_source, dtype=float)
-        elif (delay_source := getattr(bbh, "t_bsi_myr", None)) is not None:
-            delay_s = np.asarray(delay_source, dtype=float) * Myr
-        else:
-            return None
-
-    if delay_s.shape != (bbh.num,):
-        raise ValueError(f"BSI delay array must have shape ({bbh.num},)")
-    return np.asarray(delay_s, dtype=np.float64)
-
-
-def construct_bsi_timeline(
-    bbh: BBH_properties,
-    event_delay_s: np.ndarray | None = None,
-) -> BSI_Timeline:
-    """Build absolute-time BSI events from recorded flags and event delays.
-
-    This function does not update orbital parameters.  It only translates the
-    recorded applied-BSI flag and delay fields into absolute event times,
-    ``event_s = t_ini_s + delay_s``.  If no delay field is available it returns
-    an empty ledger instead of assigning artificial event times. The current
-    reduced model records only weak BSI perturbation events.
-    """
-    if bbh.num == 0:
-        return BSI_Timeline.empty()
-
-    delay_s = _resolve_bsi_delay_s(bbh, event_delay_s)
-    if delay_s is None:
-        return BSI_Timeline.empty()
-
-    valid_time = np.isfinite(delay_s) & (delay_s >= 0.0)
-    flags = bbh.flags
-    weak_mask = valid_time & (flags.bsi_event_flag != 0)
-    if not np.any(weak_mask):
-        return BSI_Timeline.empty()
-
-    binary_idx: IndexArray = np.flatnonzero(weak_mask).astype(
-        np.intp,
-        copy=False,
-    )
-    event_s: FloatArray = np.asarray(
-        bbh.t_ini_s[binary_idx] + delay_s[binary_idx],
-        dtype=np.float64,
-    )
-    order: IndexArray = np.asarray(
-        np.lexsort((binary_idx, event_s)),
-        dtype=np.intp,
-    )
-
-    return BSI_Timeline(
-        binary_idx=binary_idx[order],
-        event_s=event_s[order],
-    )

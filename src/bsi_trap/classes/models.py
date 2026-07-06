@@ -202,6 +202,7 @@ class BBH_properties(object):
 
         self.t_ini_s = np.zeros(num, float)
         self.t_del_s = np.zeros(num, float)
+
         self.bsi_timescale_s = np.full(num, np.nan, float)
         self.bsi_applied_flag = np.zeros(num, int)
         self.bsi_weak_count = np.zeros(num, int)
@@ -212,6 +213,7 @@ class BBH_properties(object):
         self.track_time_s = np.empty(0, dtype=np.float64)
         self.track_sma_cm = np.empty(0, dtype=np.float64)
         self.track_ecc = np.empty(0, dtype=np.float64)
+
         self._track_binary_idx_chunks: list[IntArray] = []
         self._track_step_idx_chunks: list[IntArray] = []
         self._track_time_s_chunks: list[FloatArray] = []

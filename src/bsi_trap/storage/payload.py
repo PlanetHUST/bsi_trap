@@ -12,7 +12,7 @@ import numpy as np
 from bsi_trap.classes.models import AGN_properties, BBH_properties, DiskProfile
 from bsi_trap.config.model_config import ModelConfig
 from bsi_trap.constant import constant as const
-from bsi_trap.evolve.timeline import EvolutionTimeline
+from bsi_trap.timeline.models import EvolutionTimeline
 from bsi_trap.hierarchical.remnants import HierarchicalMergerLedger
 from bsi_trap.initialization.trap_population import TrapPopulation
 

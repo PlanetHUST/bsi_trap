@@ -19,8 +19,8 @@ from bsi_trap.evolve.trap_migration import (
     resolve_mass_dependent_trap_migration,
 )
 from bsi_trap.evolve.trap_context import build_trap_context
-from bsi_trap.evolve.pairing import construct_pairing_up_timeline
-from bsi_trap.evolve.timeline import PairingTimeline
+from bsi_trap.timeline.models import PairingTimeline
+from bsi_trap.timeline.pairing import construct_pairing_up_timeline
 
 
 @dataclass(frozen=True)
@@ -191,7 +191,7 @@ def construct_initial_trap_population(
 
     _validate_trap_state(ebh, end_time_s)
 
-    # 3. initialization population
+    # 3. Initialization population
     bbh = init_bbh(ebh)
     sbh = init_sbh(ebh)
 

@@ -14,9 +14,9 @@ from bsi_trap.classes.models import (
 from bsi_trap.constant import constant as const
 from bsi_trap.constant.stop_reason import StopReasons
 from bsi_trap.evolve.physical_quantity import migration_threshold
-from bsi_trap.evolve.timeline import BoolArray, FloatArray, IndexArray
 from bsi_trap.functions import merger_properties as merger
 from bsi_trap.functions.nsc_population import mass_enclosed_NSC
+from bsi_trap.timeline.models import BoolArray, FloatArray, IndexArray
 
 
 @dataclass(frozen=True)

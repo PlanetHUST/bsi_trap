@@ -92,12 +92,12 @@ population containers, storage schema, and plotting summaries live under
 | Environment | `src/bsi_trap/initialization/environment.py` | Build AGN properties, pAGN disk profile, and shared reference trap. |
 | Embedded population | `src/bsi_trap/initialization/embedded_bh.py` | Sample embedded BH masses, formation times, and initial radii. |
 | Trap population | `src/bsi_trap/initialization/trap_population.py` | Prepare embedded-BH migration and trap-arrival state; optional `pair_initial=True` still builds standalone initial pairing diagnostics. |
-| Pairing physics | `src/bsi_trap/evolve/pairing.py`, `src/bsi_trap/functions/pairing_physics.py` | Build event-driven pair-up timelines; the scheduler can request only the next accepted event with `max_events=1`. |
+| Pairing timeline | `src/bsi_trap/timeline/pairing.py`, `src/bsi_trap/functions/pairing_physics.py` | Build event-driven pair-up timelines from local pairing physics; the scheduler can request only the next accepted event with `max_events=1`. |
 | Hierarchical event scheduler | `src/bsi_trap/hierarchical/generations.py` | Own the chronological pairing/remnant recycling loop until no later pair forms inside the AGN duty cycle. |
 | BBH parameters | `src/bsi_trap/initialization/bbh_parameters.py` | Assign BBH semimajor axes, eccentricities, spins, and tilts. |
 | BBH evolution | `src/bsi_trap/evolve/gen_evolve.py`, `binary_evolution.py`, `gas_harden.py`, `gw.py` | Evolve committed BBHs through gas/GW dynamics and BSI effects while sharing orbit bookkeeping. |
-| BSI effects | `src/bsi_trap/evolve/bsi.py` | Apply scheduled weak BSI perturbations and construct the BSI event ledger. |
-| Timelines | `src/bsi_trap/evolve/timeline.py` | Store event/output timelines; not the place for physical updates. |
+| BSI effects | `src/bsi_trap/evolve/bsi.py` | Schedule and apply weak BSI perturbations to mutable BBH state. |
+| Timelines | `src/bsi_trap/timeline/` | Store event/output timelines and construct ledgers from already-updated state; not the place for physical updates. |
 | Storage | `src/bsi_trap/storage/` | Own HDF5 contract, payload construction, combination, and summaries. |
 | Analysis/plots | `src/workflow/analysis_run.py`, `src/workflow/plot_run.py` | Summarize run metadata and generate compact timeline diagnostics. |
 
@@ -210,7 +210,7 @@ instead of treating all reached BHs as a fully mixed one-zone bath.
 The authoritative pair-up function is:
 
 ```text
-src/bsi_trap/evolve/pairing.py::construct_pairing_up_timeline()
+src/bsi_trap/timeline/pairing.py::construct_pairing_up_timeline()
 ```
 
 Reached BHs are processed in `t_reach_s` order.  Arrived unpaired BHs enter a
@@ -322,7 +322,7 @@ it does not own the physical update.
 BSI is now represented by two responsibilities:
 
 1. `apply_scheduled_bsi_step()` changes the binary during evolution.
-2. `construct_bsi_timeline()` records when the event happened.
+2. `bsi_trap.timeline.construct_bsi_timeline()` records when the event happened.
 
 The scheduled BSI delay is stored on the BBH as `bsi_timescale_s`.  When an
 integration step crosses that delay and `model_config.bsi_enabled` is true,

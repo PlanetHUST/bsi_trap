@@ -23,7 +23,6 @@ from bsi_trap.constant.stop_reason import (
 from bsi_trap.evolve import gen_evolve
 from bsi_trap.evolve.bsi import (
     apply_scheduled_bsi_step,
-    construct_bsi_timeline,
     schedule_bsi_events,
 )
 from bsi_trap.evolve.gas_harden import ode_with_gas
@@ -33,13 +32,18 @@ from bsi_trap.evolve.physical_quantity import (
     compute_eccentricity_at_frequency,
     threshold_radius,
 )
-from bsi_trap.evolve.timeline import BSI_Timeline, EvolutionTimeline, PairingTimeline
 from bsi_trap.evolve.tracks import append_bbh_track, finalize_bbh_tracks
 from bsi_trap.hierarchical.generations import (
     evolve_hierarchical_generations,
 )
 from bsi_trap.hierarchical.remnants import HierarchicalMergerLedger
 from bsi_trap.initialization.trap_population import TrapPopulation
+from bsi_trap.timeline.bsi import construct_bsi_timeline
+from bsi_trap.timeline.models import (
+    BSI_Timeline,
+    EvolutionTimeline,
+    PairingTimeline,
+)
 
 
 def _disk() -> DiskProfile:

@@ -328,8 +328,8 @@ src/workflow/sample_run.py
 src/cli/simulate_command.py
 src/bsi_trap/initialization/environment.py
 src/bsi_trap/initialization/trap_population.py
+src/bsi_trap/timeline/
 src/bsi_trap/hierarchical/generations.py
-src/bsi_trap/evolve/pairing.py
 src/bsi_trap/evolve/gen_evolve.py
 src/bsi_trap/evolve/binary_evolution.py
 src/bsi_trap/evolve/bsi.py

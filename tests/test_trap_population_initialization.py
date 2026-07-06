@@ -33,9 +33,7 @@ from bsi_trap.classes.models import (
     Single_BH_properties,
     TrapContext,
 )
-from bsi_trap.evolve.pairing import construct_pairing_up_timeline
 from bsi_trap.evolve.trap_context import build_trap_context
-from bsi_trap.evolve.timeline import PairingTimeline
 from bsi_trap.initialization.bbh_parameters import BBH_params_initialize
 from bsi_trap.functions.pairing_physics import (
     conjunction_rate,
@@ -48,6 +46,8 @@ from bsi_trap.functions.pairing_physics import (
 from bsi_trap.functions.random_sample import sample_embedded_radius
 from bsi_trap.initialization.embedded_bh import load_filtered_stellar_population
 from bsi_trap.initialization.environment import make_environment
+from bsi_trap.timeline.models import PairingTimeline
+from bsi_trap.timeline.pairing import construct_pairing_up_timeline
 from bsi_trap.initialization.trap_population import (
     construct_initial_trap_population,
     init_bbh,

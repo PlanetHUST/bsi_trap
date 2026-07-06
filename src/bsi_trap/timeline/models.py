@@ -1,4 +1,4 @@
-"""Event timeline data contracts used by evolution stages."""
+"""Event timeline data contracts used across the simulation workflow."""
 
 from __future__ import annotations
 

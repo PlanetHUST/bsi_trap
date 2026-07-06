@@ -66,6 +66,10 @@ EvolutionTimeline
     bsi_timeline
 ```
 
+The timeline data contracts and ledger-building helpers live under
+`src/bsi_trap/timeline/`; the evolution modules update physical state first and
+then hand that state to the timeline layer for packaging.
+
 Scenario-level choices live in `ModelConfig`, while BBH integration policy lives
 in `BBHEvolverParams`.  The latter now owns the reduced-model numerical knobs
 that used to be scattered through the gas/GW evolution code:
@@ -130,7 +134,7 @@ The strongest parts of the current workflow are:
 - BBH evolution policy is centralized in `BBHEvolverParams`, reducing hidden
   constants in the gas/GW hardening routines.
 - BSI now has a simple and explicit responsibility split: the evolution module
-  mutates the binary, while `BSI_Timeline` records the applied event time.
+  mutates the binary, while `bsi_trap.timeline` records the applied event time.
 - HDF5 output is schema-driven through `storage/payload.py` and
   `storage/schemas.py`.
 - Plotting is now focused on high-density diagnostics:

@@ -19,7 +19,6 @@ from bsi_trap.classes.models import (
 )
 from bsi_trap.config.model_config import ModelConfig
 from bsi_trap.evolve.gen_evolve import GenerationEvolutionResult
-from bsi_trap.evolve.timeline import BSI_Timeline, EvolutionTimeline, PairingTimeline
 from bsi_trap.hdf5_load.timeline_catalog import TimelineCatalog, read_timeline_catalog
 from bsi_trap.hierarchical.generations import GenerationRecord, HierarchicalRun
 from bsi_trap.hierarchical.remnants import HierarchicalMergerLedger
@@ -38,6 +37,7 @@ from bsi_trap.storage.payload import (
     write_sample_manifest,
 )
 from bsi_trap.storage.save_gen import save_generation_to_file
+from bsi_trap.timeline.models import BSI_Timeline, EvolutionTimeline, PairingTimeline
 from workflow import sample_run
 from workflow.analysis_run import run_analysis_workflow
 from workflow.plot_run import run_plotting_workflow
