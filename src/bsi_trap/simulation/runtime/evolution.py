@@ -10,7 +10,10 @@ from bsi_trap.simulation.state.models import (
 from bsi_trap.simulation.config.model_config import ModelConfig
 from bsi_trap.constant.constant import Myr
 from bsi_trap.simulation.evolution.generation import EvolutionResult
-from bsi_trap.simulation.initial_conditions.trap_population import TrapPopulation
+from bsi_trap.simulation.initial_conditions.population import (
+    TrapArrivalState,
+    empty_trap_population,
+)
 from bsi_trap.simulation.runtime.binary_events import (
     activate_pair_event as _activate_pair_event,
     advance_active_binaries as _advance_active_binaries,
@@ -62,21 +65,18 @@ def evolve_trap_runtime(
     model_config: ModelConfig,
     agn: AGN_properties,
     disk: DiskProfile,
-    initial_population: TrapPopulation,
+    initial_state: TrapArrivalState,
     rng_pair_up: np.random.Generator,
     rng_orbit: np.random.Generator,
     rng_spin: np.random.Generator,
 ) -> TrapEvolveRun:
     """Evolve the trap population with one top-level physical event clock."""
 
-    if initial_population.binaries.num != 0:
-        raise ValueError("Runtime evolution expects trap-arrival singles only")
-
     end_time_s = float(agn.lifetime_myr * Myr)
     state = StateLog(
         current_time_s=0.0,
-        live_singles=_combine_single_populations(initial_population.singles),
-        embedded_bh=initial_population.embedded_bh,
+        live_singles=_combine_single_populations(initial_state.singles),
+        embedded_bh=initial_state.embedded_bh,
     )
     records: list[EvolutionRecord] = []
     next_record_index = 1
@@ -136,14 +136,19 @@ def evolve_trap_runtime(
         if boundary_s <= state.current_time_s:
             break
 
-        bsi_is_boundary = (
+        boundary_bsi_event = None
+        if (
             bsi_event is not None
             and (pair_time_s is None or bsi_event.time_s < pair_time_s)
             and np.isclose(boundary_s, bsi_event.time_s)
-        )
+        ):
+            boundary_bsi_event = bsi_event
 
-        if bsi_is_boundary:
-            _prime_bsi_event(state.active_binaries[bsi_event.active_index], bsi_event)
+        if boundary_bsi_event is not None:
+            _prime_bsi_event(
+                state.active_binaries[boundary_bsi_event.active_index],
+                boundary_bsi_event,
+            )
 
         _advance_active_binaries(
             state=state,
@@ -157,15 +162,15 @@ def evolve_trap_runtime(
         )
         state.current_time_s = float(boundary_s)
 
-        if bsi_is_boundary:
+        if boundary_bsi_event is not None:
             _record_event(
                 state,
                 kind="bsi",
-                time_s=bsi_event.time_s,
-                generation=bsi_event.generation,
-                record_index=bsi_event.record_index,
-                binary_idx=bsi_event.binary_idx,
-                active_index=bsi_event.active_index,
+                time_s=boundary_bsi_event.time_s,
+                generation=boundary_bsi_event.generation,
+                record_index=boundary_bsi_event.record_index,
+                binary_idx=boundary_bsi_event.binary_idx,
+                active_index=boundary_bsi_event.active_index,
             )
             continue
 
@@ -192,7 +197,7 @@ def evolve_trap_runtime(
             EvolutionRecord(
                 record_index=next_record_index,
                 generation=0,
-                population=initial_population,
+                population=empty_trap_population(initial_state),
                 outcome=EvolutionResult(
                     evolution_timeline=EvolutionTimeline.empty(),
                     hierarchical_mergers=HierarchicalMergerLedger.empty(),

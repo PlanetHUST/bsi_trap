@@ -12,7 +12,7 @@ from bsi_trap.simulation.state.models import (
 from bsi_trap.simulation.config.model_config import ModelConfig
 from bsi_trap.simulation.evolution.generation import EvolutionResult, evolve_single_binary
 from bsi_trap.physics.binary.tracks import finalize_bbh_tracks
-from bsi_trap.simulation.initial_conditions.trap_population import TrapPopulation
+from bsi_trap.simulation.initial_conditions.population import TrapPopulation
 from bsi_trap.simulation.runtime.remnants import build_hierarchical_mergers
 from bsi_trap.simulation.runtime.singles import combine_single_populations
 from bsi_trap.simulation.runtime.state import (

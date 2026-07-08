@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Run a trap-population initialization diagnostic from a source checkout."""
+"""Run a trap-arrival initialization diagnostic from a source checkout."""
 
 from __future__ import annotations
 
@@ -15,12 +15,12 @@ from bsi_trap.simulation.config.model_config import ModelConfig
 from bsi_trap.simulation.config.rng import make_rng_streams, resolve_seed
 from bsi_trap.constant.constant import Myr
 from bsi_trap.simulation.initial_conditions.environment import make_environment
-from bsi_trap.simulation.initial_conditions.trap_population import make_trap_population
+from bsi_trap.simulation.initial_conditions.arrival import make_trap_arrival_state
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Initialize one AGN trap population and print a compact summary."
+        description="Initialize one AGN trap-arrival reservoir and print a summary."
     )
     parser.add_argument("--smbh-mass", type=float, default=1.0e6)
     parser.add_argument("--seed", type=int, default=42)
@@ -75,22 +75,19 @@ def main() -> None:
     )
 
     agn, disk = make_environment(config, args.smbh_mass)
-    population = make_trap_population(
+    arrival_state = make_trap_arrival_state(
         model_config=config,
         agn=agn,
         disk=disk,
         rng_nsc=rng.nsc,
     )
 
-    embedded = population.embedded_bh
-    binaries = population.binaries
-    singles = population.singles
-    pairing = population.pairing_timeline
+    embedded = arrival_state.embedded_bh
+    singles = arrival_state.singles
     reached = int(np.count_nonzero(embedded.trap_flag != -1))
-    paired_members = int(np.count_nonzero(embedded.trap_flag >= 0))
     preview = max(0, args.preview)
 
-    print("Trap population diagnostic")
+    print("Trap arrival diagnostic")
     print(f"  model: {config.model_name}")
     print(f"  seed: {seed}")
     print(f"  SMBH mass [Msun]: {agn.M_SMBH_msun:.6g}")
@@ -99,30 +96,16 @@ def main() -> None:
     print(f"  trap radius [cm]: {disk.r_trap_cm:.6e}")
     print(f"  embedded BHs: {embedded.num}")
     print(f"  reached trap: {reached}")
-    print(f"  paired BH members: {paired_members}")
-    print(f"  BBHs: {binaries.num}")
     print(f"  trap singles: {singles.num}")
-    print(f"  pair events: {pairing.size}")
 
-    if pairing.size > 0 and preview > 0:
-        shown = min(preview, pairing.size)
-        print(f"  first {shown} BBH formation times [Myr]:")
-        print(f"    {_format_time_myr(pairing.formation_s, shown)}")
-
-    if binaries.num > 0 and preview > 0:
-        shown = min(preview, binaries.num)
-        print(f"  first {shown} BBH primary masses [Msun]:")
+    if singles.num > 0 and preview > 0:
+        shown = min(preview, singles.num)
+        print(f"  first {shown} single masses [Msun]:")
         print(
-            f"    {np.array2string(binaries.m1_msun[:shown], precision=4, separator=', ')}"
+            f"    {np.array2string(singles.m_msun[:shown], precision=4, separator=', ')}"
         )
-        print(f"  first {shown} BBH secondary masses [Msun]:")
-        print(
-            f"    {np.array2string(binaries.m2_msun[:shown], precision=4, separator=', ')}"
-        )
-        print(f"  first {shown} BBH eccentricities:")
-        print(
-            f"    {np.array2string(binaries.ecc[:shown], precision=4, separator=', ')}"
-        )
+        print(f"  first {shown} single available times [Myr]:")
+        print(f"    {_format_time_myr(singles.available_from_s, shown)}")
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ import numpy as np
 
 from bsi_trap.simulation.state.models import Embedded_BH, Single_BH_properties
 from bsi_trap.simulation.evolution.generation import EvolutionResult
-from bsi_trap.simulation.initial_conditions.trap_population import TrapPopulation
+from bsi_trap.simulation.initial_conditions.population import TrapPopulation
 from bsi_trap.simulation.timeline.models import FloatArray, IntArray
 
 

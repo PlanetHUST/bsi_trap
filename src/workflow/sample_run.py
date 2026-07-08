@@ -11,9 +11,7 @@ from bsi_trap.simulation.state.models import (
 
 from bsi_trap.simulation.config.model_config import ModelConfig
 from bsi_trap.simulation.initial_conditions.environment import make_environment
-from bsi_trap.simulation.initial_conditions.trap_population import (
-    make_trap_population,
-)
+from bsi_trap.simulation.initial_conditions.arrival import make_trap_arrival_state
 from bsi_trap.simulation.runtime.evolution import evolve_trap_runtime
 from bsi_trap.simulation.config.rng import resolve_seed, make_rng_streams
 from bsi_trap.storage.contract import HDF5Contract
@@ -68,8 +66,6 @@ def run_physics_sample(
 ) -> SampleWorkflowResult:
 
     # 1. Resolve the sample-local random streams.
-    # Each physical subsystem gets its own stream so changing one stochastic
-    # step does not silently reshuffle all later draws.
     master_seed = resolve_seed(seed if seed is not None else model_config.master_seed)
     sample_seed = master_seed if seed is not None else master_seed + sample_index
     rng = make_rng_streams(sample_seed)
@@ -80,8 +76,6 @@ def run_physics_sample(
     )
 
     # 2. Build the AGN environment for this SMBH mass.
-    # This step owns the pAGN disk profile, torque profile, and reference trap
-    # geometry used by later migration and pairing kernels.
     agn, disk = make_environment(
         model_config=model_config,
         smbh_mass=smbh_mass,
@@ -95,7 +89,7 @@ def run_physics_sample(
     # 3. Initialize the trap-arrival population.
     # Reaching the trap only creates live single BHs here; BBH formation is not
     # precomputed at initialization.
-    population = make_trap_population(
+    arrival_state = make_trap_arrival_state(
         model_config=model_config,
         agn=agn,
         disk=disk,
@@ -105,9 +99,8 @@ def run_physics_sample(
         sample_index,
         model_config.simulation_type,
         "trap arrival population: "
-        f"embedded={population.embedded_bh.num}, "
-        f"BBH={population.binaries.num}, "
-        f"single={population.singles.num}",
+        f"embedded={arrival_state.embedded_bh.num}, "
+        f"single={arrival_state.singles.num}",
     )
 
     # 4. Run the unified trap event clock.
@@ -119,7 +112,7 @@ def run_physics_sample(
         model_config=model_config,
         agn=agn,
         disk=disk,
-        initial_population=population,
+        initial_state=arrival_state,
         rng_pair_up=rng.pair_up,
         rng_orbit=rng.dynamics,
         rng_spin=rng.spin,

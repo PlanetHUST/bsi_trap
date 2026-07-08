@@ -14,7 +14,7 @@ from bsi_trap.simulation.config.model_config import ModelConfig
 from bsi_trap.constant import constant as const
 from bsi_trap.simulation.timeline.models import EvolutionTimeline
 from bsi_trap.simulation.runtime.remnants import HierarchicalMergerLedger
-from bsi_trap.simulation.initial_conditions.trap_population import TrapPopulation
+from bsi_trap.simulation.initial_conditions.population import TrapPopulation
 
 from .contract import HDF5Contract
 

@@ -12,7 +12,7 @@ from bsi_trap.simulation.state.models import (
 from bsi_trap.simulation.config.model_config import ModelConfig
 from bsi_trap.physics.trap.context import build_trap_context
 from bsi_trap.simulation.initial_conditions.bbh_parameters import BBH_params_initialize
-from bsi_trap.simulation.initial_conditions.trap_population import TrapPopulation
+from bsi_trap.simulation.initial_conditions.population import TrapPopulation
 from bsi_trap.simulation.runtime.singles import copy_singles_by_index
 from bsi_trap.simulation.timeline.models import PairingTimeline
 from bsi_trap.simulation.timeline.pairing import construct_pairing_step_timeline
