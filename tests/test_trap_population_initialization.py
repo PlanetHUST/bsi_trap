@@ -47,8 +47,9 @@ from bsi_trap.functions.random_sample import sample_embedded_radius
 from bsi_trap.initialization.embedded_bh import load_filtered_stellar_population
 from bsi_trap.initialization.environment import make_environment
 from bsi_trap.timeline.models import PairingTimeline
-from bsi_trap.timeline.pairing import construct_pairing_up_timeline
+from bsi_trap.timeline.pairing import construct_pairing_step_timeline
 from bsi_trap.initialization.trap_population import (
+    construct_initial_pairing_timeline,
     construct_initial_trap_population,
     init_bbh,
     init_sbh,
@@ -277,10 +278,9 @@ class TestPairingTimeline(unittest.TestCase):
     @classmethod
     def _build_pairing_timeline(cls, seed: int):
         config, disk, ebh, reached_mask = cls._pairing_inputs()
-        pairing_timeline = construct_pairing_up_timeline(
-            embedded_bh=ebh,
+        pairing_timeline = construct_initial_pairing_timeline(
+            ebh=ebh,
             reached_mask=reached_mask,
-            trap_context=build_trap_context(disk, config),
             model_config=config,
             disk=disk,
             smbh_mass_msun=1.0e6,
@@ -332,10 +332,9 @@ class TestPairingTimeline(unittest.TestCase):
         ebh.t_reach_s[:] = [1.0, 1.0]
         ebh.r_pair_cm[:] = [1.00e12, 1.90e12]
 
-        pairing_timeline = construct_pairing_up_timeline(
-            embedded_bh=ebh,
+        pairing_timeline = construct_initial_pairing_timeline(
+            ebh=ebh,
             reached_mask=np.array([True, True]),
-            trap_context=build_trap_context(disk, config),
             model_config=config,
             disk=disk,
             smbh_mass_msun=1.0e6,
@@ -345,6 +344,26 @@ class TestPairingTimeline(unittest.TestCase):
 
         self.assertEqual(pairing_timeline.size, 0)
         np.testing.assert_array_equal(ebh.trap_flag, [-2, -2])
+
+    def test_pairing_step_does_not_search_past_step_boundary(self) -> None:
+        config, disk, _, _ = self._pairing_inputs()
+        singles = Single_BH_properties(2)
+        singles.m_msun[:] = [10.0, 20.0]
+        singles.available_from_s[:] = [0.0, 0.0]
+        singles.r_pair_cm[:] = [1.00e12, 1.01e12]
+
+        pairing_timeline = construct_pairing_step_timeline(
+            singles=singles,
+            trap_context=build_trap_context(disk, config),
+            model_config=config,
+            disk=disk,
+            smbh_mass_msun=1.0e6,
+            current_time_s=0.0,
+            step_end_s=1.0,
+            rng_pair_up=np.random.default_rng(7),
+        )
+
+        self.assertEqual(pairing_timeline.size, 0)
 
     def test_pair_up_timescale_uses_midplane_density(self) -> None:
         _, disk, _, _ = self._pairing_inputs()

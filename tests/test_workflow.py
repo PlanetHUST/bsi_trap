@@ -18,7 +18,7 @@ from bsi_trap.classes.models import (
     Single_BH_properties,
 )
 from bsi_trap.config.model_config import ModelConfig
-from bsi_trap.evolve.gen_evolve import GenerationEvolutionResult
+from bsi_trap.evolve.gen_evolve import EvolutionResult
 from bsi_trap.hdf5_load.timeline_catalog import TimelineCatalog, read_timeline_catalog
 from bsi_trap.initialization.trap_population import TrapPopulation
 from bsi_trap.parallel_compute.single_work import process_single_sample_worker
@@ -29,9 +29,9 @@ from bsi_trap.plots.timeline_evolution import (
     _population_curves,
 )
 from bsi_trap.runtime.evolution import (
-    TrapEvolutionRecord,
-    TrapRuntimeRun,
-    TrapRuntimeState,
+    EvolutionRecord,
+    StateLog,
+    TrapEvolveRun,
 )
 from bsi_trap.runtime.remnants import HierarchicalMergerLedger
 from bsi_trap.storage.contract import HDF5Contract
@@ -231,8 +231,6 @@ class TestWorkflow(TestCase):
                     "0.1",
                     "--alpha",
                     "0.02",
-                    "--max-generations",
-                    "3",
                 ]
             )
 
@@ -252,7 +250,6 @@ class TestWorkflow(TestCase):
         self.assertEqual(model.object_scale_height_fraction, 0.5)
         self.assertEqual(model.trap_radial_sigma_in_scale_height, 0.1)
         self.assertEqual(model.alpha, 0.02)
-        self.assertEqual(model.max_generations, 3)
 
     def test_generation_data_writes_hdf5_contract(self) -> None:
         config = ModelConfig(model_name="workflow-test")
@@ -452,22 +449,23 @@ class TestWorkflow(TestCase):
                 stop_reason=np.array([0], dtype=np.int64),
                 bsi_timeline=BSI_Timeline.empty(),
             )
-            return TrapRuntimeRun(
+            return TrapEvolveRun(
                 records=(
-                    TrapEvolutionRecord(
+                    EvolutionRecord(
                         record_index=1,
                         generation=1,
                         population=generation_population,
-                        outcome=GenerationEvolutionResult(
+                        outcome=EvolutionResult(
                             evolution_timeline=evolution_timeline,
                             hierarchical_mergers=HierarchicalMergerLedger.empty(),
                         ),
                     ),
                 ),
                 events=(),
-                final_state=TrapRuntimeState(
+                final_state=StateLog(
                     current_time_s=13.0,
                     live_singles=Single_BH_properties(0),
+                    embedded_bh=arrival_population.embedded_bh,
                 ),
             )
 

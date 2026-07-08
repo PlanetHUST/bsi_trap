@@ -24,7 +24,7 @@ SMBH + AGN disk
     -> trap-arrival single-BH reservoir
     -> finite pair-up at/near the trap
     -> committed BBHs plus unpaired trap singles/remnants
-    -> BBH hardening, GW evolution, and scheduled BSI effects
+    -> BBH hardening, GW evolution, and runtime weak BSI events
     -> merger/non-merger state and remnant feedback recorded to HDF5
 ```
 
@@ -66,7 +66,7 @@ make_trap_population()
 evolve_trap_runtime()
         |
         v
-sample_next_pair_event(max_events=1) + advance_bbh_segment()
+construct_pairing_step_timeline() + advance_bbh_segment()
         |
         v
 BBH_params_initialize() + remnant recycling
@@ -92,11 +92,11 @@ population containers, storage schema, and plotting summaries live under
 | Environment | `src/bsi_trap/initialization/environment.py` | Build AGN properties, pAGN disk profile, and shared reference trap. |
 | Embedded population | `src/bsi_trap/initialization/embedded_bh.py` | Sample embedded BH masses, formation times, and initial radii. |
 | Trap population | `src/bsi_trap/initialization/trap_population.py` | Prepare embedded-BH migration and trap-arrival singles. Standalone first-pair diagnostics use `construct_initial_trap_population()` directly. |
-| Pairing timeline | `src/bsi_trap/timeline/pairing.py`, `src/bsi_trap/functions/pairing_physics.py` | Build event-driven pair-up timelines from local pairing physics; the runtime can request only the next accepted event with `max_events=1`. |
-| Runtime event loop | `src/bsi_trap/runtime/evolution.py`, `src/bsi_trap/runtime/remnants.py` | Own live singles, active BBHs, current time, the event ledger, and merger-remnant recycling on one clock. |
+| Pairing timeline | `src/bsi_trap/timeline/pairing.py`, `src/bsi_trap/functions/pairing_physics.py` | Build event-driven pair-up timelines from local pairing physics; runtime uses `construct_pairing_step_timeline()` on live singles inside one time window. |
+| Runtime event loop | `src/bsi_trap/runtime/evolution.py`, `src/bsi_trap/runtime/remnants.py` | Own live singles, active BBHs, current time, pair/BSI/merger event ordering, the event ledger, and merger-remnant recycling on one clock. |
 | BBH parameters | `src/bsi_trap/initialization/bbh_parameters.py` | Assign BBH semimajor axes, eccentricities, spins, and tilts. |
 | BBH evolution | `src/bsi_trap/evolve/gen_evolve.py`, `binary_evolution.py`, `gas_harden.py`, `gw.py` | Evolve committed BBHs through gas/GW dynamics and BSI effects while sharing orbit bookkeeping. |
-| BSI effects | `src/bsi_trap/evolve/bsi.py` | Schedule and apply weak BSI perturbations to mutable BBH state. |
+| BSI effects | `src/bsi_trap/evolve/bsi.py` | Provide the reduced BSI rate and apply runtime-primed weak perturbations to mutable BBH state. |
 | Timelines | `src/bsi_trap/timeline/` | Store event/output timelines and construct ledgers from already-updated state; not the place for physical updates. |
 | Storage | `src/bsi_trap/storage/` | Own HDF5 contract, payload construction, combination, and summaries. |
 | Analysis/plots | `src/workflow/analysis_run.py`, `src/workflow/plot_run.py` | Summarize run metadata and generate compact timeline diagnostics. |
@@ -207,16 +207,18 @@ instead of treating all reached BHs as a fully mixed one-zone bath.
 
 ## Pair-Up and Committed BBHs
 
-The authoritative pair-up function is:
+The runtime pair-up kernel is:
 
 ```text
-src/bsi_trap/timeline/pairing.py::construct_pairing_up_timeline()
+src/bsi_trap/timeline/pairing.py::construct_pairing_step_timeline()
 ```
 
-Reached BHs are processed in `t_reach_s` order.  Arrived unpaired BHs enter a
-waiting reservoir.  Candidate pairs are filtered by local radial overlap and a
-strong-gravity gate.  The current phase-averaged conjunction rate is based on
-the difference in local orbital frequencies:
+It consumes the live `Single_BH_properties` reservoir directly.  Only singles
+with `available_from_s <= current_time_s` are eligible inside the current step;
+future arrivals stay in the reservoir for later runtime steps.  Candidate pairs
+are filtered by local radial overlap and a strong-gravity gate.  The current
+phase-averaged conjunction rate is based on the difference in local orbital
+frequencies:
 
 ```text
 lambda_ij = |Omega_1 - Omega_2| / (2 pi)
@@ -230,22 +232,24 @@ t_pair = 3 c_s^3 / (4 pi G^2 rho_g (m1 + m2))
 t_BBH  = t_encounter + t_pair
 ```
 
-A pair is accepted only if the resulting BBH formation time is inside the AGN
-lifetime.  Both embedded-BH members then store reciprocal `trap_flag` indices
-and the same `t_pair_s`.
+A runtime pair is accepted only if the resulting BBH formation time lands before
+the current step boundary.  The initialization-only
+`construct_initial_pairing_timeline()` function remains for standalone
+embedded-BH diagnostics that intentionally process a full reached population.
 
 In the main sample workflow, `make_trap_population()` stops after migration and
 trap admission, so all reached trap objects enter as live singles.
 `evolve_trap_runtime()` then owns the live reservoir, active BBHs, current time,
 and event ledger.  At each runtime step it asks
-`construct_pairing_up_timeline(..., max_events=1)` for the next accepted pair,
+`construct_pairing_step_timeline()` for a pair inside the current time window,
 advances active BBHs only to the next global boundary, and returns retained
 merger remnants to the live singles before requesting the following pair.
 
-The conversion step creates the population for the current committed event:
+The conversion step creates the population for the current committed runtime
+event:
 
-- `BBH_properties` from reciprocal embedded-BH pairs;
-- `Single_BH_properties` from reached, unpaired trap objects.
+- `BBH_properties` from the paired live-single indices;
+- `Single_BH_properties` from the remaining live singles.
 
 The conservation condition is:
 
@@ -311,26 +315,31 @@ mass, spin, GW recoil, disk retention, trap-overload status, and the retained
 single-BH seeds that can feed a later higher-generation pairing.
 
 `evolve_trap_runtime()` owns the outer event loop.  It starts from the
-migration-arrival singles, commits accepted pairs, advances active BBHs to the
-next pair/merger/duty-cycle boundary, mixes retained remnants back into the live
-singles, and stops when no further pair or active-BBH event remains inside the
-AGN duty cycle.  Each committed event keeps its own pairing timeline, evolution
-timeline, remnant ledger, and generation tag.
+migration-arrival singles, commits accepted pairs, samples weak BSI events from
+the current active BBHs and live singles, advances active BBHs to the next
+pair/BSI/merger/duty-cycle boundary, mixes retained remnants back into the live
+singles, and stops when no further pair, BSI, or active-BBH event remains inside
+the AGN duty cycle.  Each committed event keeps its own pairing timeline,
+evolution timeline, remnant ledger, and generation tag.
 
 The important design rule is that a timeline records event times and outcomes;
 it does not own the physical update.
 
 ## BSI Responsibility Split
 
-BSI is now represented by two responsibilities:
+BSI is now represented by three responsibilities:
 
-1. `apply_scheduled_bsi_step()` changes the binary during evolution.
-2. `bsi_trap.timeline.construct_bsi_timeline()` records when the event happened.
+1. `evolve_trap_runtime()` samples and records the next weak BSI event from the
+   current live singles and active BBH state.
+2. `apply_scheduled_bsi_step()` changes the binary during segment evolution once
+   the runtime-primed delay is crossed.
+3. `bsi_trap.timeline.construct_bsi_timeline()` records when the applied event
+   happened.
 
-The scheduled BSI delay is stored on the BBH as `bsi_timescale_s`.  When an
-integration step crosses that delay and `model_config.bsi_enabled` is true,
-the smooth gas/GW state is first advanced to the scheduled time, then the BSI
-effect is applied to that current orbital state.
+The runtime-primed BSI delay is stored on the BBH as `bsi_timescale_s`,
+measured from BBH formation.  When an integration step crosses that delay and
+`model_config.bsi_enabled` is true, the smooth gas/GW state is first advanced to
+the event time, then the BSI effect is applied to that current orbital state.
 
 For weak BSI events, the reduced model:
 
@@ -346,9 +355,9 @@ For weak BSI events, the reduced model:
 t_BSI = t_ini_s + bsi_timescale_s
 ```
 
-In HDF5, `bbh_properties/bsi_timescale_s` remains the scheduled delay.  The
+In HDF5, `bbh_properties/bsi_timescale_s` remains the runtime-primed delay.  The
 `timescales/t_bsi_myr` field is an applied-event time: it is finite only when
-the BSI flag shows that the scheduled perturbation actually occurred.
+the BSI flag shows that the perturbation actually occurred.
 
 Ionization, ejection, and exchange are not represented in the current reduced
 BSI evolution.  The in-memory flags and HDF5 flag payload expose only the
@@ -375,7 +384,7 @@ timescales
 trap_population
 ```
 
-The trap population group preserves embedded-BH migration/pairing history,
+The trap population group preserves embedded-BH migration/trap-arrival history,
 including `t_form_s`, `t_mig_s`, `t_reach_s`, `t_pair_s`, `r_pair_cm`, and the
 pairing timeline arrays.
 
@@ -440,26 +449,25 @@ Implemented now:
   `evolve_trap_runtime()`;
 - committed-BBH and trap-single initialization;
 - gas/GW evolution;
-- scheduled reduced BSI effects;
+- runtime-selected reduced BSI effects;
 - per-generation HDF5 storage;
 - analysis and compact timeline visualization.
 
 Still incomplete:
 
-- top-level BSI events in the runtime ledger; scheduled BSI is still applied
-  inside each BBH segment;
 - physical BSI exchange, ejection, ionization, or prompt-merger channels;
 - production-grade scientific calibration of the reduced pair-up and BSI
   prescriptions.
 
-The next major framework step should be first-class BSI events in the runtime
-ledger:
+The next major BSI step should be richer physical outcomes behind the same
+runtime event boundary:
 
 ```text
 inject newly arrived singles
     -> pair available singles
-    -> evolve active BBHs
-    -> apply scheduled weak BSI from the live single reservoir
+    -> sample runtime BSI from active BBHs and live singles
+    -> evolve active BBHs to the BSI/merger/duty boundary
+    -> apply weak BSI or a future detailed BSI outcome
     -> process mergers and remnants
     -> return retained remnants/singles to the trap
     -> record population snapshots until AGN end

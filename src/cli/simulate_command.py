@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 
 from cli.common import add_log_level_argument, configure_logging_from_args
-from bsi_trap.config.model_config import ModelConfig
+from bsi_trap.simulation.config.model_config import ModelConfig
 from workflow.parallel_manager import run_simulation_workflow
 from workflow.sample_run import run_physics_sample
 
@@ -61,7 +61,6 @@ def add_simulate_arguments(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=0.25,
     )
-    parser.add_argument("--max-generations", type=int, default=4)
 
 
 def add_simulate_parser(subparsers) -> None:
@@ -100,7 +99,6 @@ def run_simulate_command(args: argparse.Namespace) -> None:
             trap_radial_sigma_in_scale_height=(
                 args.trap_radial_dispersion_scale_heights
             ),
-            max_generations=args.max_generations,
         )
     ]
 

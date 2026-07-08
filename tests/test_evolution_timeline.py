@@ -21,10 +21,7 @@ from bsi_trap.constant.stop_reason import (
     stop_reason_type,
 )
 from bsi_trap.evolve import gen_evolve
-from bsi_trap.evolve.bsi import (
-    apply_scheduled_bsi_step,
-    schedule_bsi_events,
-)
+from bsi_trap.evolve.bsi import apply_scheduled_bsi_step
 from bsi_trap.evolve.gas_harden import ode_with_gas
 from bsi_trap.evolve.gw import ode_gw_only
 from bsi_trap.evolve.numeric import para_evo
@@ -35,8 +32,11 @@ from bsi_trap.evolve.physical_quantity import (
 from bsi_trap.evolve.tracks import append_bbh_track, finalize_bbh_tracks
 from bsi_trap.initialization.trap_population import TrapPopulation
 from bsi_trap.runtime.evolution import (
-    TrapEvolutionRecord,
+    ActiveBinary,
+    EvolutionRecord,
+    RuntimeBSIEvent,
     evolve_trap_runtime,
+    _sample_next_bsi_event,
 )
 from bsi_trap.runtime.remnants import HierarchicalMergerLedger
 from bsi_trap.timeline.bsi import construct_bsi_timeline
@@ -86,7 +86,6 @@ class TestEvolutionTimeline(TestCase):
 
         np.testing.assert_array_equal(timeline.binary_idx, [0, 1])
         np.testing.assert_allclose(timeline.event_s, [11.0, 22.0])
-        np.testing.assert_allclose(timeline.weak_perturbation_s, [11.0, 22.0])
 
     def test_bsi_timeline_is_empty_without_event_delays(self) -> None:
         bbh = BBH_properties(1)
@@ -133,60 +132,62 @@ class TestEvolutionTimeline(TestCase):
 
         timeline = construct_bsi_timeline(bbh)
         np.testing.assert_allclose(timeline.event_s, [10.5])
-        np.testing.assert_allclose(timeline.weak_perturbation_s, [10.5])
 
-    def test_bsi_scheduler_samples_live_single_reservoir_delays(self) -> None:
-        bbh = BBH_properties(2)
-        bbh.m1_msun[:] = [30.0, 25.0]
-        bbh.m2_msun[:] = [20.0, 15.0]
-        bbh.sma_cm[:] = [1.0e10, 2.0e10]
-        bbh.t_ini_s[:] = [0.0, 2.0 * const.Myr]
-
-        sbh = Single_BH_properties(3)
-        sbh.m_msun[:] = [10.0, 12.0, 14.0]
-        sbh.t_ini_s[:] = [1.0, 1.5, 3.0]
-        sbh.t_ini_s *= const.Myr
-        agn = AGN_properties(M_SMBH_msun=1.0e6, lifetime_myr=10.0)
-
-        scheduled = schedule_bsi_events(
-            ModelConfig(model_name="bsi-scheduler-test", bsi_enabled=True),
-            agn,
-            _disk(),
-            bbh,
-            sbh,
-            np.random.default_rng(1),
-        )
-
-        self.assertTrue(np.all(scheduled))
-        self.assertTrue(np.all(np.isfinite(bbh.bsi_timescale_s)))
-        event_s = bbh.t_ini_s + bbh.bsi_timescale_s
-        self.assertTrue(np.all(event_s >= bbh.t_ini_s))
-        self.assertTrue(np.all(event_s >= np.min(sbh.t_ini_s)))
-        self.assertTrue(np.all(event_s <= agn.lifetime_myr * const.Myr))
-
-    def test_bsi_scheduler_preserves_existing_delays(self) -> None:
+    def test_runtime_bsi_sampler_uses_current_state_and_live_singles(self) -> None:
         bbh = BBH_properties(1)
         bbh.m1_msun[:] = [30.0]
         bbh.m2_msun[:] = [20.0]
-        bbh.sma_cm[:] = [1.0e10]
-        bbh.t_ini_s[:] = [0.0]
-        bbh.bsi_timescale_s[:] = [0.25 * const.Myr]
-
-        sbh = Single_BH_properties(1)
-        sbh.m_msun[:] = [10.0]
-        sbh.t_ini_s[:] = [0.0]
-
-        scheduled = schedule_bsi_events(
-            ModelConfig(model_name="bsi-preserve-test", bsi_enabled=True),
-            AGN_properties(M_SMBH_msun=1.0e6, lifetime_myr=10.0),
-            _disk(),
-            bbh,
-            sbh,
-            np.random.default_rng(1),
+        bbh.sma_cm[:] = [7.5e10]
+        bbh.t_ini_s[:] = [4.0]
+        population = TrapPopulation(
+            embedded_bh=Embedded_BH(0),
+            binaries=bbh,
+            singles=Single_BH_properties(0),
+            pairing_timeline=PairingTimeline.empty(),
         )
+        live_singles = Single_BH_properties(2)
+        live_singles.m_msun[:] = [10.0, 99.0]
+        live_singles.t_ini_s[:] = [5.0, 12.0]
 
-        self.assertFalse(scheduled[0])
-        np.testing.assert_allclose(bbh.bsi_timescale_s, [0.25 * const.Myr])
+        def fake_rate(*args):
+            received_bbh = args[3]
+            active_single_masses = args[5]
+            np.testing.assert_allclose(received_bbh.sma_cm, [7.5e10])
+            np.testing.assert_allclose(active_single_masses, [10.0])
+            return 0.5
+
+        with mock.patch(
+            "bsi_trap.runtime.evolution.binary_single_rate_s_inv",
+            side_effect=fake_rate,
+        ):
+            event = _sample_next_bsi_event(
+                model_config=ModelConfig(
+                    model_name="runtime-bsi-sampler-test",
+                    bsi_enabled=True,
+                ),
+                agn=AGN_properties(M_SMBH_msun=1.0e6, lifetime_myr=10.0),
+                disk=_disk(),
+                active_binaries=[
+                    ActiveBinary(
+                        record_index=7,
+                        generation=2,
+                        population=population,
+                    )
+                ],
+                live_singles=live_singles,
+                current_time_s=10.0,
+                step_end_s=20.0,
+                rng_orbit=np.random.default_rng(1),
+            )
+
+        self.assertIsNotNone(event)
+        if event is None:
+            self.fail("Runtime BSI sampler did not return an event")
+        self.assertGreater(event.time_s, 10.0)
+        self.assertLess(event.time_s, 20.0)
+        self.assertEqual(event.record_index, 7)
+        self.assertEqual(event.generation, 2)
+        self.assertEqual(event.binary_idx, 0)
 
     def test_eccentricity_at_frequency_interpolates_bracketed_step(self) -> None:
         m1_g = 30.0 * const.msun
@@ -219,7 +220,6 @@ class TestEvolutionTimeline(TestCase):
         bbh.m1_msun[:] = [30.0, 30.0]
         bbh.m2_msun[:] = [20.0, 20.0]
         bbh.t_ini_s[:] = [10.0, 20.0]
-        sbh = Single_BH_properties(0)
         evol_params = BBHEvolverParams(
             rlist=np.array([1.0]),
             sigmalist=np.array([1.0]),
@@ -244,7 +244,6 @@ class TestEvolutionTimeline(TestCase):
                 agn,
                 _disk(),
                 bbh,
-                sbh,
                 rng_orbit=np.random.default_rng(1),
             )
 
@@ -267,7 +266,6 @@ class TestEvolutionTimeline(TestCase):
             AGN_properties(M_SMBH_msun=1.0e6, lifetime_myr=10.0),
             _disk(),
             BBH_properties(0),
-            Single_BH_properties(0),
             rng_orbit=np.random.default_rng(1),
         )
 
@@ -460,7 +458,6 @@ class TestEvolutionProcess(TestCase):
             AGN_properties(M_SMBH_msun=1.0e6, lifetime_myr=10.0),
             _disk(),
             bbh,
-            Single_BH_properties(0),
             rng_orbit=np.random.default_rng(1),
         )
         timeline = outcome.evolution_timeline
@@ -491,7 +488,6 @@ class TestEvolutionProcess(TestCase):
             AGN_properties(M_SMBH_msun=1.0e6, lifetime_myr=10.0),
             _disk(),
             bbh,
-            Single_BH_properties(0),
             rng_orbit=np.random.default_rng(1),
         )
         timeline = outcome.evolution_timeline
@@ -524,7 +520,6 @@ class TestEvolutionProcess(TestCase):
             AGN_properties(M_SMBH_msun=1.0e6, lifetime_myr=10.0),
             _disk(),
             bbh,
-            Single_BH_properties(0),
             rng_orbit=np.random.default_rng(1),
         )
 
@@ -534,11 +529,8 @@ class TestEvolutionProcess(TestCase):
         self.assertLess(bbh.track_sma_cm[1], bbh.track_sma_cm[0])
         self.assertGreater(bbh.track_ecc[1], bbh.track_ecc[0])
 
-    def test_generation_schedules_bsi_from_live_singles(self) -> None:
+    def test_make_generation_does_not_schedule_bsi_from_live_singles(self) -> None:
         bbh = self._near_merger_binary(sma_factor=1.0e3)
-        sbh = Single_BH_properties(1)
-        sbh.m_msun[:] = [10.0]
-        sbh.t_ini_s[:] = [0.0]
 
         gen_evolve.make_generation(
             self._evol_params(),
@@ -550,13 +542,12 @@ class TestEvolutionProcess(TestCase):
             AGN_properties(M_SMBH_msun=1.0e6, lifetime_myr=10.0),
             _disk(),
             bbh,
-            sbh,
             rng_orbit=np.random.default_rng(1),
         )
 
-        self.assertTrue(np.isfinite(bbh.bsi_timescale_s[0]))
-        self.assertEqual(bbh.flags.bsi_event_flag[0], 1)
-        self.assertGreaterEqual(bbh.bsi_weak_count[0], 1)
+        self.assertFalse(np.isfinite(bbh.bsi_timescale_s[0]))
+        self.assertEqual(bbh.flags.bsi_event_flag[0], 0)
+        self.assertEqual(bbh.bsi_weak_count[0], 0)
 
     def test_gas_bsi_evolves_smoothly_before_scheduled_event(
         self,
@@ -575,7 +566,6 @@ class TestEvolutionProcess(TestCase):
             agn,
             _disk(),
             bbh,
-            Single_BH_properties(0),
             rng_orbit=np.random.default_rng(1),
         )
 
@@ -609,7 +599,6 @@ class TestEvolutionProcess(TestCase):
             agn,
             _disk(),
             bbh,
-            Single_BH_properties(0),
             rng_orbit=np.random.default_rng(1),
         )
 
@@ -631,7 +620,6 @@ class TestEvolutionProcess(TestCase):
             agn,
             _disk(),
             bbh,
-            Single_BH_properties(0),
             rng_orbit=np.random.default_rng(1),
         )
 
@@ -656,7 +644,6 @@ class TestEvolutionProcess(TestCase):
             AGN_properties(M_SMBH_msun=1.0e6, lifetime_myr=10.0),
             _disk(),
             bbh,
-            Single_BH_properties(0),
             rng_orbit=np.random.default_rng(1),
         )
         timeline = outcome.evolution_timeline
@@ -679,7 +666,6 @@ class TestEvolutionProcess(TestCase):
             AGN_properties(M_SMBH_msun=1.0e6, lifetime_myr=10.0),
             _disk(),
             bbh,
-            Single_BH_properties(0),
             rng_orbit=np.random.default_rng(1),
         )
 
@@ -704,7 +690,6 @@ class TestEvolutionProcess(TestCase):
             AGN_properties(M_SMBH_msun=1.0e6, lifetime_myr=10.0),
             _disk(),
             bbh,
-            Single_BH_properties(0),
             rng_orbit=np.random.default_rng(1),
         )
 
@@ -736,7 +721,6 @@ class TestEvolutionProcess(TestCase):
                 AGN_properties(M_SMBH_msun=1.0e2, lifetime_myr=10.0),
                 _disk(),
                 bbh,
-                Single_BH_properties(0),
                 rng_orbit=np.random.default_rng(1),
             )
 
@@ -832,12 +816,11 @@ class TestTrapRuntimeLoop(TestCase):
 
         pairing_inputs: list[np.ndarray] = []
 
-        def fake_pairing(embedded_bh, *args, max_events=None, **kwargs):
-            pairing_inputs.append(np.array(embedded_bh.m_msun, copy=True))
-            self.assertEqual(max_events, 1)
-            if np.array_equal(embedded_bh.m_msun, [30.0, 20.0, 10.0]):
-                embedded_bh.trap_flag[:] = [1, 0, -2]
-                embedded_bh.t_pair_s[:] = [1.0, 1.0, np.nan]
+        def fake_pairing(*, singles, current_time_s, step_end_s, **kwargs):
+            pairing_inputs.append(np.array(singles.m_msun, copy=True))
+            if np.array_equal(singles.m_msun, [30.0, 20.0, 10.0]):
+                self.assertEqual(current_time_s, 0.0)
+                self.assertGreaterEqual(step_end_s, 1.0)
                 return PairingTimeline(
                     first_idx=np.array([0], dtype=np.intp),
                     second_idx=np.array([1], dtype=np.intp),
@@ -846,14 +829,10 @@ class TestTrapRuntimeLoop(TestCase):
                     pair_delay_s=np.array([0.5]),
                     formation_s=np.array([1.0]),
                 )
-            if np.array_equal(embedded_bh.m_msun, [10.0]):
-                embedded_bh.trap_flag[:] = [-2]
-                embedded_bh.t_pair_s[:] = [np.nan]
+            if np.array_equal(singles.m_msun, [10.0]):
                 return PairingTimeline.empty()
-            if embedded_bh.num == 0:
+            if singles.num == 0:
                 return PairingTimeline.empty()
-            embedded_bh.trap_flag[:] = [1, 0]
-            embedded_bh.t_pair_s[:] = [6.0, 6.0]
             return PairingTimeline(
                 first_idx=np.array([0], dtype=np.intp),
                 second_idx=np.array([1], dtype=np.intp),
@@ -877,20 +856,20 @@ class TestTrapRuntimeLoop(TestCase):
         def fake_finalize(**kwargs):
             active = kwargs["active"]
             if active.record_index == 1:
-                return TrapEvolutionRecord(
+                return EvolutionRecord(
                     record_index=1,
                     generation=1,
                     population=active.population,
-                    outcome=gen_evolve.GenerationEvolutionResult(
+                    outcome=gen_evolve.EvolutionResult(
                         first_timeline,
                         first_ledger,
                     ),
                 )
-            return TrapEvolutionRecord(
+            return EvolutionRecord(
                 record_index=2,
                 generation=2,
                 population=active.population,
-                outcome=gen_evolve.GenerationEvolutionResult(
+                outcome=gen_evolve.EvolutionResult(
                     second_timeline,
                     HierarchicalMergerLedger.empty(),
                 ),
@@ -898,7 +877,7 @@ class TestTrapRuntimeLoop(TestCase):
 
         with (
             mock.patch(
-                "bsi_trap.runtime.evolution.construct_pairing_up_timeline",
+                "bsi_trap.runtime.evolution.construct_pairing_step_timeline",
                 side_effect=fake_pairing,
             ) as pairing_mock,
             mock.patch(
@@ -936,6 +915,98 @@ class TestTrapRuntimeLoop(TestCase):
         np.testing.assert_allclose(second_bbh.m1_msun, [45.0])
         np.testing.assert_allclose(second_bbh.m2_msun, [10.0])
         np.testing.assert_array_equal(second_bbh.generation, [2])
+
+    def test_runtime_records_bsi_as_top_level_event(self) -> None:
+        initial_population = self._embedded_population(
+            masses_msun=[30.0, 20.0, 10.0],
+            reach_times_s=[0.0, 0.0, 0.0],
+        )
+
+        def fake_pairing(*, singles, current_time_s, **kwargs):
+            if current_time_s == 0.0 and singles.num == 3:
+                return PairingTimeline(
+                    first_idx=np.array([0], dtype=np.intp),
+                    second_idx=np.array([1], dtype=np.intp),
+                    later_arrival_s=np.array([0.0]),
+                    encounter_s=np.array([0.5]),
+                    pair_delay_s=np.array([0.5]),
+                    formation_s=np.array([1.0]),
+                )
+            return PairingTimeline.empty()
+
+        def fake_bsi_event(**kwargs):
+            active_binaries = kwargs["active_binaries"]
+            current_time_s = kwargs["current_time_s"]
+            if (
+                current_time_s >= 1.0
+                and active_binaries
+                and active_binaries[0].population.binaries.bsi_applied_flag[0] == 0
+            ):
+                return RuntimeBSIEvent(
+                    time_s=2.0,
+                    active_index=0,
+                    record_index=active_binaries[0].record_index,
+                    generation=active_binaries[0].generation,
+                    binary_idx=0,
+                )
+            return None
+
+        def fake_advance(**kwargs):
+            active = kwargs["active"]
+            boundary_s = float(kwargs["boundary_s"])
+            bbh = active.population.binaries
+            bbh.t_del_s[:] = boundary_s - bbh.t_ini_s
+            bsi_event_s = bbh.t_ini_s[0] + bbh.bsi_timescale_s[0]
+            if np.isfinite(bsi_event_s) and np.isclose(boundary_s, bsi_event_s):
+                bbh.flags.bsi_event_flag[:] = [1]
+                bbh.bsi_applied_flag[:] = [1]
+                bbh.bsi_weak_count[:] = [1]
+                return boundary_s
+            if bbh.bsi_applied_flag[0] != 0 and boundary_s > 2.0:
+                bbh.flags.stop_reason_flag[:] = [StopReasons.STOP_AGN_LIFETIME]
+            return boundary_s
+
+        with (
+            mock.patch(
+                "bsi_trap.runtime.evolution.construct_pairing_step_timeline",
+                side_effect=fake_pairing,
+            ),
+            mock.patch(
+                "bsi_trap.runtime.evolution._sample_next_bsi_event",
+                side_effect=fake_bsi_event,
+            ),
+            mock.patch(
+                "bsi_trap.runtime.evolution.advance_bbh_segment",
+                side_effect=fake_advance,
+            ),
+        ):
+            run = evolve_trap_runtime(
+                Evolparams=BBHEvolverParams(
+                    rlist=np.array([1.0]),
+                    sigmalist=np.array([1.0]),
+                    hlist=np.array([0.1]),
+                    cslist=np.array([1.0]),
+                ),
+                model_config=ModelConfig(
+                    model_name="runtime-bsi-event-test",
+                    bsi_enabled=True,
+                ),
+                agn=AGN_properties(M_SMBH_msun=1.0e6, lifetime_myr=1.0e-10),
+                disk=_wide_disk(),
+                initial_population=initial_population,
+                rng_pair_up=np.random.default_rng(1),
+                rng_orbit=np.random.default_rng(2),
+                rng_spin=np.random.default_rng(3),
+            )
+
+        np.testing.assert_allclose(run.bsi_event_s, [2.0])
+        self.assertIn("bsi", [event.kind for event in run.events])
+        bsi_event = next(event for event in run.events if event.kind == "bsi")
+        self.assertEqual(bsi_event.record_index, 1)
+        self.assertEqual(bsi_event.binary_idx, 0)
+        bbh = run.records[0].population.binaries
+        np.testing.assert_allclose(bbh.bsi_timescale_s, [1.0])
+        self.assertEqual(bbh.flags.bsi_event_flag[0], 1)
 
     def test_runtime_records_empty_state_when_no_pair_forms(self) -> None:
         run = evolve_trap_runtime(

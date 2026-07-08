@@ -11,11 +11,11 @@ from _bootstrap import add_src_to_path
 
 add_src_to_path()
 
-from bsi_trap.config.model_config import ModelConfig
-from bsi_trap.config.rng import make_rng_streams, resolve_seed
+from bsi_trap.simulation.config.model_config import ModelConfig
+from bsi_trap.simulation.config.rng import make_rng_streams, resolve_seed
 from bsi_trap.constant.constant import Myr
-from bsi_trap.initialization.environment import make_environment
-from bsi_trap.initialization.trap_population import make_trap_population
+from bsi_trap.simulation.initial_conditions.environment import make_environment
+from bsi_trap.simulation.initial_conditions.trap_population import make_trap_population
 
 
 def build_parser() -> argparse.ArgumentParser:

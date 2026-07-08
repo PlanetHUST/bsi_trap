@@ -4,18 +4,18 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 
-from bsi_trap.classes.models import (
+from bsi_trap.simulation.state.models import (
     BBHEvolverParams,
     DiskProfile,
 )
 
-from bsi_trap.config.model_config import ModelConfig
-from bsi_trap.initialization.environment import make_environment
-from bsi_trap.initialization.trap_population import (
+from bsi_trap.simulation.config.model_config import ModelConfig
+from bsi_trap.simulation.initial_conditions.environment import make_environment
+from bsi_trap.simulation.initial_conditions.trap_population import (
     make_trap_population,
 )
-from bsi_trap.runtime.evolution import evolve_trap_runtime
-from bsi_trap.config.rng import resolve_seed, make_rng_streams
+from bsi_trap.simulation.runtime.evolution import evolve_trap_runtime
+from bsi_trap.simulation.config.rng import resolve_seed, make_rng_streams
 from bsi_trap.storage.contract import HDF5Contract
 from bsi_trap.storage.payload import (
     GenerationState,
@@ -67,7 +67,9 @@ def run_physics_sample(
     seed: int | None = None,
 ) -> SampleWorkflowResult:
 
-    # 1. Random seed generator
+    # 1. Resolve the sample-local random streams.
+    # Each physical subsystem gets its own stream so changing one stochastic
+    # step does not silently reshuffle all later draws.
     master_seed = resolve_seed(seed if seed is not None else model_config.master_seed)
     sample_seed = master_seed if seed is not None else master_seed + sample_index
     rng = make_rng_streams(sample_seed)
@@ -77,7 +79,9 @@ def run_physics_sample(
         f"start: Msmbh={smbh_mass:.3e} Msun",
     )
 
-    # 2. Build environment
+    # 2. Build the AGN environment for this SMBH mass.
+    # This step owns the pAGN disk profile, torque profile, and reference trap
+    # geometry used by later migration and pairing kernels.
     agn, disk = make_environment(
         model_config=model_config,
         smbh_mass=smbh_mass,
@@ -88,7 +92,9 @@ def run_physics_sample(
         f"disk: rtrap={disk.r_trap_cm:.3e} cm",
     )
 
-    # 3. Initialize trap population
+    # 3. Initialize the trap-arrival population.
+    # Reaching the trap only creates live single BHs here; BBH formation is not
+    # precomputed at initialization.
     population = make_trap_population(
         model_config=model_config,
         agn=agn,
@@ -104,6 +110,10 @@ def run_physics_sample(
         f"single={population.singles.num}",
     )
 
+    # 4. Run the unified trap event clock.
+    # The runtime owns live singles, active BBHs, current time, and recycled
+    # merger remnants. Pairing and weak BSI are sampled one time window at a
+    # time, then committed BBHs are advanced only to the next global boundary.
     runtime_run = evolve_trap_runtime(
         Evolparams=_evolver_params(disk),
         model_config=model_config,
@@ -115,6 +125,8 @@ def run_physics_sample(
         rng_spin=rng.spin,
     )
 
+    # Finalized records are the storage units: each record contains the
+    # committed pair population, its BBH evolution timeline, and remnant ledger.
     final_record = runtime_run.final_record
     evolved_binary_count = runtime_run.evolved_binary_count
     merger_count = runtime_run.merger_count
@@ -136,7 +148,9 @@ def run_physics_sample(
         f"recycled={final_record.outcome.hierarchical_mergers.recycled_count}",
     )
 
-    # 5. data storage
+    # 5. Persist every finalized runtime record.
+    # A physical sample can produce multiple records when retained remnants
+    # re-enter the live single reservoir and pair again.
     output_files: list[Path] = []
     contract = HDF5Contract(root_dir=output_file.parent)
     final_state: GenerationState | None = None
@@ -166,6 +180,10 @@ def run_physics_sample(
         raise RuntimeError("No generation state was produced")
 
     output_file = output_files[-1]
+
+    # 6. Write the per-sample manifest after all generation files exist.
+    # The manifest points analysis/plotting code at the final state and the
+    # complete list of per-record HDF5 outputs for this SMBH sample.
     manifest_file = write_sample_manifest(
         model_config=model_config,
         state=final_state,

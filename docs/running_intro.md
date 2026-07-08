@@ -243,17 +243,18 @@ The current workflow can:
 - Sample an embedded BH population and assign formation times and radii.
 - Resolve mass-dependent migration targets and trap-arrival times.
 - Build a migration-only trap-arrival population for the main workflow.
-- Use the runtime event loop to request the next accepted local pair, advance
-  active BBHs to the next boundary, and return retained merger remnants to the
-  live single reservoir.
+- Use the runtime event loop to request a local pair inside the current time
+  window, advance active BBHs to the next boundary, and return retained merger
+  remnants to the live single reservoir.
 - Store the pairing timeline: later arrival, encounter time, pair-up delay, and
   BBH formation time.
 - Initialize each committed BBH population's orbital and spin parameters.
 - Evolve BBHs with either gas-plus-GW or GW-only evolution.
 - Recycle retained merger remnants until no later accepted pair forms inside the
   AGN duty cycle.
-- Schedule reduced BSI events from the available trap-single reservoir and
-  apply the weak BSI update when the BBH evolution reaches the scheduled time.
+- Sample reduced BSI events from the current live trap-single reservoir and
+  active BBHs, then apply the weak BSI update when the runtime reaches that
+  event boundary.
 - Write per-generation HDF5 files, sample manifests, worker metadata, combined
   HDF5 files, and a simulation summary.
 - Run basic analysis and smoke-run plotting from `simulation_summary.json`.
@@ -277,18 +278,15 @@ one SMBH mass sample
 The current workflow does not yet implement the full AGN trap merger model.
 Important missing pieces are:
 
-- No single shared event queue that evolves active BBHs, scheduled BSI events,
-  pairings, and remnant feedback together.
-- BSI scheduling is still reduced to the live single reservoir available when a
-  committed BBH population is evolved.
+- BSI events now share the runtime clock with pairings, active BBHs, and remnant
+  feedback, but the BSI rate and outcome are still reduced.
 - No physical BSI exchange outcome that replaces a BBH component with an
   incoming single.
 - No prompt-merger BSI channel.
 - No self-consistent update of compact-object scale height after vertical
   heating.
 - The CLI exposes the main current `ModelConfig` fields, including gas mode,
-  BSI enablement, pair-up scale, trap geometry, and the legacy maximum
-  generation field.
+  BSI enablement, pair-up scale, and trap geometry.
   Future model fields still need to be added explicitly when they become part
   of the production workflow.
 - No production-grade statistical analysis.  Current plots are smoke

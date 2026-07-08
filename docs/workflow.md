@@ -29,11 +29,13 @@ reservoir, active BBHs, current time, and an event ledger.  The staged contract
 is:
 
 - initialization builds migration and trap-arrival state;
-- the runtime asks pairing for the next accepted pair from the live singles;
+- the runtime asks the single-BH pairing step kernel for an event inside the
+  current time window;
 - active BBHs evolve only to the next global boundary;
 - retained merger remnants are returned to the live single reservoir;
 - retained remnants carry generation tags and can pair again as live singles;
-- BSI is a scheduled weak perturbation applied inside the BBH segment kernel;
+- BSI is sampled as a top-level weak event from the current runtime state and
+  then applied by the BBH segment kernel at that boundary;
 - timelines record event times and outcomes;
 - storage writes the final state plus event ledgers.
 
@@ -103,10 +105,11 @@ t_BBH = t_encounter + t_pair
 ```
 
 where `t_encounter` is the absolute encounter event time stored by the pairing
-ledger.  Conceptually, the encounter is sampled after the active reservoir
-boundary set by the later arrival and the current trap clock.  The encounter
-time is therefore not optional bookkeeping: the pair cannot begin gas-assisted
-completion before the two objects have become an eligible local pair.
+ledger.  Runtime pairing is sampled from `Single_BH_properties` over the
+current interval only: from the current trap clock to the next live-single
+arrival, active-BBH event, or AGN-duty boundary.  The encounter time is
+therefore not optional bookkeeping: the pair cannot begin gas-assisted
+completion before the two objects have become eligible live singles.
 
 After BBH formation, the binary evolves through the current gas/GW/BSI routines
 until it merges or reaches a stop condition.  If a merger occurs, the remnant
@@ -133,8 +136,10 @@ The strongest parts of the current workflow are:
   show real evolution paths instead of only initial/final points.
 - BBH evolution policy is centralized in `BBHEvolverParams`, reducing hidden
   constants in the gas/GW hardening routines.
-- BSI now has a simple and explicit responsibility split: the evolution module
-  mutates the binary, while `bsi_trap.timeline` records the applied event time.
+- BSI now has a simple and explicit responsibility split: the runtime samples
+  weak event times from live singles and active BBHs, the evolution module
+  mutates the binary at the selected boundary, and `bsi_trap.timeline` records
+  the applied event time.
 - HDF5 output is schema-driven through `storage/payload.py` and
   `storage/schemas.py`.
 - Plotting is now focused on high-density diagnostics:
@@ -148,38 +153,31 @@ forcing storage, plotting, or binary integration to own scheduler policy.
 The next tasks should be ordered by physical importance and by how much they
 change the workflow contract.
 
-1. Extend the shared runtime clock around detailed BSI events.
+1. Improve the BSI physics kernel.
 
-   Pairing, active BBH evolution boundaries, merger processing, and retained
-   remnant recycling now happen on one chronological runtime.  The next
-   framework step is to expose scheduled BSI events as first-class runtime
-   events instead of applying them only inside the BBH segment kernel:
+   Pairing, active BBH evolution boundaries, weak BSI event selection, merger
+   processing, and retained remnant recycling now happen on one chronological
+   runtime.  The next BSI step is to replace the current weak-only update with
+   physically richer outcomes:
 
    ```text
    inject newly reached singles
        -> pair eligible singles/remnants
        -> evolve active BBHs to the next event boundary
-       -> apply scheduled weak BSI
+       -> sample/apply runtime weak BSI when it is the next boundary
        -> process mergers and retained/escaped remnants
        -> return retained singles/remnants to the reservoir
        -> record population snapshots until AGN duty-cycle end
    ```
 
-2. Improve the BSI physics kernel.
-
-   The current BSI implementation is weak perturbation only.  It changes
-   eccentricity, semimajor axis, and spin tilts, but it does not model
-   ionization, ejection, exchange, or a calibrated few-body outcome
-   distribution.
-
-3. Calibrate pair-up and BSI rates.
+2. Calibrate pair-up and BSI rates.
 
    The current local model is useful as a reduced phase-averaged prescription,
    but the rate normalization and outcome distributions still need physical
    calibration against the intended literature model or a controlled scattering
    calculation.
 
-4. Extend diagnostics around population balance.
+3. Extend diagnostics around population balance.
 
    The compact plot tracks active single BHs and BBHs.  Future diagnostics
    should separate migration-origin singles, retained remnants, escaped
@@ -193,14 +191,14 @@ but it should not be read as the final AGN trap population simulation.
 
 Important caveats:
 
-- Pairing, active BBHs, and retained-remnant feedback use one runtime clock, but
-  scheduled BSI events are still applied inside each BBH segment rather than
-  represented as standalone top-level events.
+- Pairing, active BBHs, weak BSI events, and retained-remnant feedback use one
+  runtime clock, but the current BSI outcome is still only a reduced weak
+  perturbation.
 - Pair-up is local and event-driven, but still phase-averaged.  It is not a
   resolved N-body calculation.
 - BSI is weak-only.  Ionization, ejection, and exchange are intentionally not
   represented in the current reduced evolution.
-- `t_bsi_myr` in HDF5 means an applied BSI event time.  A scheduled but
+- `t_bsi_myr` in HDF5 means an applied BSI event time.  A runtime-primed but
   unapplied BSI delay remains in `bbh_properties/bsi_timescale_s`.
 - Timeline plots are clipped at the AGN duty cycle.  Events beyond that
   boundary are treated as physically irrelevant for the current run.

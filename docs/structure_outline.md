@@ -122,7 +122,7 @@ large density of BHs in the trap, after calculate the binary and single populati
         3. prepare migration-only trap-arrival population
         4. run chronological pairing/remnant scheduler
         5. initialize each committed BBH population
-        6. evolve BBHs with gas/GW and scheduled weak BSI
+        6. evolve BBHs with gas/GW and runtime-selected weak BSI
         7. construct pairing/evolution/BSI/remnant ledgers
         8. return retained remnants to the live single reservoir
         9. save generation HDF5 payloads and sample metadata
@@ -135,7 +135,7 @@ the most important part in the evolution workflow
 
 |            | discrete process                     | continue process |
 | ---------- | ------------------------------------ | ---------------- |
-| for binary | scheduled BSI perturbation; merge; pair-up formation | gas/GW evolution |
+| for binary | runtime BSI perturbation; merge; pair-up formation | gas/GW evolution |
 | for single | to pair-up                           | reservoir waiting |
 
 ## It's important to make one demo evolution part
@@ -227,7 +227,7 @@ back to trap or out of system
 based on event-driven scenario:
 
 - smooth binary parameters evolution: gw and gas-hardening;
-- state jump: scheduled weak bsi perturbation;
+- state jump: runtime-selected weak bsi perturbation;
 - merge to remanants, binary -> single high generation BH;
 - kick out of the trap and re-enter: gw kick, single re-enter;
 
@@ -235,4 +235,4 @@ that's the detail trap population evolution
 
 ### Pair-up dynammics
 
-considering cross section and trap volumn, maybe one way to extend the instant pair-up assumption and the extre-small t_pair 
+considering cross section and trap volume, maybe one way to extend the instant pair-up assumption and the extre-small t_pair
