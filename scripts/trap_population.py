@@ -70,8 +70,8 @@ def main() -> None:
         disk_resolution=args.disk_resolution,
         pair_up_eta=args.pair_up_eta,
         trap_width_scale_heights=args.trap_width_scale_heights,
-        compact_object_scale_height_fraction=args.compact_object_scale_height_fraction,
-        trap_radial_dispersion_scale_heights=args.trap_radial_dispersion_scale_heights,
+        object_scale_height_fraction=args.compact_object_scale_height_fraction,
+        trap_radial_sigma_in_scale_height=args.trap_radial_dispersion_scale_heights,
     )
 
     agn, disk = make_environment(config, args.smbh_mass)
@@ -79,10 +79,7 @@ def main() -> None:
         model_config=config,
         agn=agn,
         disk=disk,
-        rng_pair_up=rng.pair_up,
         rng_nsc=rng.nsc,
-        rng_orbit=rng.dynamics,
-        rng_spin=rng.spin,
     )
 
     embedded = population.embedded_bh
@@ -115,11 +112,17 @@ def main() -> None:
     if binaries.num > 0 and preview > 0:
         shown = min(preview, binaries.num)
         print(f"  first {shown} BBH primary masses [Msun]:")
-        print(f"    {np.array2string(binaries.m1_msun[:shown], precision=4, separator=', ')}")
+        print(
+            f"    {np.array2string(binaries.m1_msun[:shown], precision=4, separator=', ')}"
+        )
         print(f"  first {shown} BBH secondary masses [Msun]:")
-        print(f"    {np.array2string(binaries.m2_msun[:shown], precision=4, separator=', ')}")
+        print(
+            f"    {np.array2string(binaries.m2_msun[:shown], precision=4, separator=', ')}"
+        )
         print(f"  first {shown} BBH eccentricities:")
-        print(f"    {np.array2string(binaries.ecc[:shown], precision=4, separator=', ')}")
+        print(
+            f"    {np.array2string(binaries.ecc[:shown], precision=4, separator=', ')}"
+        )
 
 
 if __name__ == "__main__":

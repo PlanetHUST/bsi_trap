@@ -40,7 +40,7 @@ def find_catalog_median_reference_trap(
     return r_trap_cm, r_antitrap_cm, torque_profile, reference_mass_msun
 
 
-def resolve_mass_dependent_trap_migration(
+def resolve_migration(
     agn: AGN_properties,
     disk: DiskProfile,
     ebh: Embedded_BH,

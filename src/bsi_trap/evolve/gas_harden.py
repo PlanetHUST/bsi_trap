@@ -178,6 +178,7 @@ def evolve_gas(
     i: int,
     *,
     bsi_enabled: bool = False,
+    segment_stop_s: float | None = None,
 ) -> float:
     """Evolve one BBH with gas plus GW hardening and return elapsed time."""
     t_ini_s = float(bbh.t_ini_s[i])
@@ -209,4 +210,5 @@ def evolve_gas(
         ode_args=(agn, disk),
         bsi_enabled=bsi_enabled,
         merger_reachability_guard=can_merge_before_limit,
+        segment_stop_s=segment_stop_s,
     )

@@ -20,8 +20,6 @@ from bsi_trap.classes.models import (
 from bsi_trap.config.model_config import ModelConfig
 from bsi_trap.evolve.gen_evolve import GenerationEvolutionResult
 from bsi_trap.hdf5_load.timeline_catalog import TimelineCatalog, read_timeline_catalog
-from bsi_trap.hierarchical.generations import GenerationRecord, HierarchicalRun
-from bsi_trap.hierarchical.remnants import HierarchicalMergerLedger
 from bsi_trap.initialization.trap_population import TrapPopulation
 from bsi_trap.parallel_compute.single_work import process_single_sample_worker
 from bsi_trap.parallel_compute.state import SimulationTask
@@ -30,6 +28,12 @@ from bsi_trap.plots.timeline_evolution import (
     _bbh_energy_angular_momentum_coordinates,
     _population_curves,
 )
+from bsi_trap.runtime.evolution import (
+    TrapEvolutionRecord,
+    TrapRuntimeRun,
+    TrapRuntimeState,
+)
+from bsi_trap.runtime.remnants import HierarchicalMergerLedger
 from bsi_trap.storage.contract import HDF5Contract
 from bsi_trap.storage.payload import (
     GenerationState,
@@ -245,8 +249,8 @@ class TestWorkflow(TestCase):
         self.assertEqual(model.bsi_eta, 4.0)
         self.assertEqual(model.pair_up_eta, 3.0)
         self.assertEqual(model.trap_width_scale_heights, 1.5)
-        self.assertEqual(model.compact_object_scale_height_fraction, 0.5)
-        self.assertEqual(model.trap_radial_dispersion_scale_heights, 0.1)
+        self.assertEqual(model.object_scale_height_fraction, 0.5)
+        self.assertEqual(model.trap_radial_sigma_in_scale_height, 0.1)
         self.assertEqual(model.alpha, 0.02)
         self.assertEqual(model.max_generations, 3)
 
@@ -414,17 +418,26 @@ class TestWorkflow(TestCase):
         bbh.sma_cm[:] = [1.2e11]
         bbh.ecc[:] = [0.2]
         bbh.t_ini_s[:] = [8.0]
-        population = TrapPopulation(
+        arrival_singles = Single_BH_properties(2)
+        arrival_singles.m_msun[:] = [20.0, 10.0]
+        arrival_singles.t_ini_s[:] = [1.0, 2.0]
+        arrival_population = TrapPopulation(
+            embedded_bh=Embedded_BH(0),
+            binaries=BBH_properties(0),
+            singles=arrival_singles,
+            pairing_timeline=PairingTimeline.empty(),
+        )
+        generation_population = TrapPopulation(
             embedded_bh=Embedded_BH(0),
             binaries=bbh,
             singles=Single_BH_properties(0),
             pairing_timeline=PairingTimeline.empty(),
         )
 
-        def fake_evolve_hierarchical_generations(**kwargs):
-            evolved_bbh = kwargs["initial_population"].binaries
-            np.testing.assert_allclose(evolved_bbh.sma_initial_cm, [1.2e11])
-            np.testing.assert_allclose(evolved_bbh.ecc_initial, [0.2])
+        def fake_evolve_trap_runtime(**kwargs):
+            self.assertEqual(kwargs["initial_population"].binaries.num, 0)
+            self.assertEqual(kwargs["initial_population"].singles.num, 2)
+            evolved_bbh = generation_population.binaries
             evolved_bbh.sma_cm[:] = [9.0e10]
             evolved_bbh.ecc[:] = [0.1]
             evolved_bbh.t_del_s[:] = [5.0]
@@ -439,17 +452,23 @@ class TestWorkflow(TestCase):
                 stop_reason=np.array([0], dtype=np.int64),
                 bsi_timeline=BSI_Timeline.empty(),
             )
-            return HierarchicalRun(
+            return TrapRuntimeRun(
                 records=(
-                    GenerationRecord(
+                    TrapEvolutionRecord(
+                        record_index=1,
                         generation=1,
-                        population=population,
+                        population=generation_population,
                         outcome=GenerationEvolutionResult(
                             evolution_timeline=evolution_timeline,
                             hierarchical_mergers=HierarchicalMergerLedger.empty(),
                         ),
                     ),
-                )
+                ),
+                events=(),
+                final_state=TrapRuntimeState(
+                    current_time_s=13.0,
+                    live_singles=Single_BH_properties(0),
+                ),
             )
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -464,12 +483,12 @@ class TestWorkflow(TestCase):
                 mock.patch.object(
                     sample_run,
                     "make_trap_population",
-                    return_value=population,
+                    return_value=arrival_population,
                 ),
                 mock.patch.object(
                     sample_run,
-                    "evolve_hierarchical_generations",
-                    side_effect=fake_evolve_hierarchical_generations,
+                    "evolve_trap_runtime",
+                    side_effect=fake_evolve_trap_runtime,
                 ) as generation_loop_mock,
                 mock.patch.object(
                     sample_run,
@@ -494,8 +513,8 @@ class TestWorkflow(TestCase):
         self.assertEqual(result.evolved_binary_count, 1)
         self.assertEqual(result.merger_count, 1)
         self.assertEqual(result.generation_files, (str(output_path),))
-        np.testing.assert_allclose(population.binaries.sma_initial_cm, [1.2e11])
-        np.testing.assert_allclose(population.binaries.sma_cm, [9.0e10])
+        self.assertTrue(np.isnan(generation_population.binaries.sma_initial_cm[0]))
+        np.testing.assert_allclose(generation_population.binaries.sma_cm, [9.0e10])
 
     def test_analysis_and_plot_workflows_write_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

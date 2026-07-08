@@ -115,6 +115,7 @@ def generation_schema(contract: HDF5Contract) -> tuple[GroupSpec, ...]:
                     "chimerg",
                     "chirem",
                     "vk_cgs",
+                    "generation",
                     "trapreach_time_s",
                     "bsi_timescale_s",
                     "bsi_weak_count",

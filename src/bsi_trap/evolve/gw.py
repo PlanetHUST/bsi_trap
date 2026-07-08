@@ -37,6 +37,7 @@ def evolve_gw_only(
     t_ini_s: float,
     *,
     bsi_enabled: bool = False,
+    segment_stop_s: float | None = None,
 ) -> float:
     """Evolve one BBH with GW emission only and return elapsed time."""
     return evolve_binary_orbit(
@@ -48,4 +49,5 @@ def evolve_gw_only(
         initial_step_fraction=Evolparams.gw_initial_step_fraction,
         ode_func=ode_gw_only,
         bsi_enabled=bsi_enabled,
+        segment_stop_s=segment_stop_s,
     )

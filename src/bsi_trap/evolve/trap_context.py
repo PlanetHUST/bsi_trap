@@ -22,22 +22,20 @@ def build_trap_context(
     workflow boundary.
     """
     gas_scale_height_cm = disk.get_scale_height_cm(disk.r_trap_cm)
+
     if width_cm is None:
+        # set in units of scale height
         width_cm = model_config.trap_width_scale_heights * gas_scale_height_cm
+
     if not np.isfinite(width_cm) or width_cm <= 0.0:
         raise ValueError("Trap width must be finite and positive")
-    compact_object_height_cm = (
-        model_config.compact_object_scale_height_fraction * gas_scale_height_cm
-    )
-    volume_cm3 = (
-        4.0
-        * np.pi
-        * disk.r_trap_cm
-        * width_cm
-        * compact_object_height_cm
-    )
+
+    object_height_cm = model_config.object_scale_height_fraction * gas_scale_height_cm
+
+    volume_cm3 = 4.0 * np.pi * disk.r_trap_cm * width_cm * object_height_cm
+
     return TrapContext(
         width_cm=width_cm,
-        scale_height_cm=compact_object_height_cm,
+        scale_height_cm=object_height_cm,
         volume_cm3=volume_cm3,
     )

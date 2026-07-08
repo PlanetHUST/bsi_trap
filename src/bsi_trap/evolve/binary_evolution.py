@@ -65,6 +65,11 @@ def _binary_state_from_bbh(bbh: BBH_properties, i: int) -> BinaryEvolutionState:
         m2_g=float(bbh.m2_msun[i] * const.msun),
         sma_cm=float(bbh.sma_cm[i]),
         ecc=float(bbh.ecc[i]),
+        delay_s=float(bbh.t_del_s[i]),
+        ecc10=float(bbh.ecc10[i]),
+        ecc0p1=float(bbh.ecc0p1[i]),
+        reached_10hz=bool(bbh.ecc10[i] != 0.0),
+        reached_0p1hz=bool(bbh.ecc0p1[i] != 0.0),
     )
 
 
@@ -304,12 +309,21 @@ def evolve_binary_orbit(
     ode_args: tuple[Any, ...] = (),
     bsi_enabled: bool = False,
     merger_reachability_guard: MergerReachabilityGuard | None = None,
+    segment_stop_s: float | None = None,
 ) -> float:
     """Integrate one BBH orbit and own all mutable bookkeeping side effects."""
     flags = bbh.flags
     flags.trap_reached_flag[i] = 1
     state = _binary_state_from_bbh(bbh, i)
     time_limit = build_evolution_time_limit(agn)
+    current_abs_s = t_ini_s + state.delay_s
+    stop_s = time_limit.stop_s
+    segment_mode = False
+    if segment_stop_s is not None and np.isfinite(segment_stop_s):
+        requested_stop_s = float(segment_stop_s)
+        if requested_stop_s > current_abs_s:
+            segment_mode = requested_stop_s < time_limit.stop_s
+            stop_s = min(stop_s, requested_stop_s)
 
     t_est_s = pq.compute_merger_time_estimate(
         state.m1_g,
@@ -322,10 +336,10 @@ def evolve_binary_orbit(
     merger_radius_cm = params.merger_radius_factor * r_th
 
     recorder = DecimatedTrackRecorder(
-        start_time_s=t_ini_s,
+        start_time_s=current_abs_s,
         start_sma_cm=state.sma_cm,
         start_ecc=state.ecc,
-        stop_time_s=time_limit.stop_s,
+        stop_time_s=stop_s,
         max_smooth_points=params.track_max_smooth_points,
     )
     _update_frequency_probes(params, state)
@@ -347,9 +361,12 @@ def evolve_binary_orbit(
         if stop_cond._stop_for_walltime(flags, i):
             break
 
-        remaining_time_s = time_limit.stop_s - (t_ini_s + state.delay_s)
+        remaining_time_s = stop_s - (t_ini_s + state.delay_s)
         if remaining_time_s <= 0.0:
-            _mark_non_merger_stop(bbh, i, time_limit.stop_reason)
+            if segment_mode:
+                flags.continue_ng_flag[i] = 1
+            else:
+                _mark_non_merger_stop(bbh, i, time_limit.stop_reason)
             break
 
         smooth_step_limit_s = remaining_time_s
@@ -384,9 +401,13 @@ def evolve_binary_orbit(
                 smooth_step_limit_s,
             )
 
-        if merger_reachability_guard is not None and not bsi_event_before_limit:
+        if (
+            merger_reachability_guard is not None
+            and not bsi_event_before_limit
+            and not segment_mode
+        ):
             if not merger_reachability_guard(state, merger_radius_cm, remaining_time_s):
-                state.delay_s = max(time_limit.stop_s - t_ini_s, 0.0)
+                state.delay_s = max(stop_s - t_ini_s, 0.0)
                 _mark_non_merger_stop(bbh, i, time_limit.stop_reason)
                 recorder.record(
                     t_ini_s + state.delay_s,
@@ -478,6 +499,10 @@ def evolve_binary_orbit(
 
         if not _outside_merger_boundary(params, state.sma_cm, r_th):
             flags.merger_flag[i] = 1
+            break
+
+        if segment_mode and state.delay_s + t_ini_s >= stop_s:
+            flags.continue_ng_flag[i] = 1
             break
 
         if state.delay_s + t_ini_s >= time_limit.duty_cycle_s:

@@ -62,7 +62,7 @@ $$E_{\rm tot}=\frac{1}{2}(m_1+m_2)v_b^2-\frac{Gm_1m_2}{a}+\frac{1}{2}m_3v_{\inft
 - weak perturbation: view binary as point mass in the third BH
 $$|\mathbf{r_b}-\mathbf{r_3}|=\frac{2G(m_1+m_2)}{v_3^2-v_{\infty}^2}$$
 
-## hierarchical mergers
+## merger remnants and higher-generation tags
 large density of BHs in the trap, after calculate the binary and single population, the binary evolution can be independent
 
 ---
@@ -102,7 +102,7 @@ large density of BHs in the trap, after calculate the binary and single populati
     - migration_torque.py 
 
 
-- hierarchical merger data storage, rather than add them all for statistics, view smbh mass dependence
+- merger-remnant data storage, rather than add them all for statistics, view smbh mass dependence
 
     physical quantities relevant to observation: 
     1. absolute merge time during the simulaion $t_{\rm merg}$
@@ -171,8 +171,8 @@ Current sample workflow:
 ```python
 def run_physics_sample(...):
     environment = make_environment(...)
-    population = make_trap_population(..., pair_initial=False)
-    run = evolve_hierarchical_generations(...)
+    population = make_trap_population(...)
+    run = evolve_trap_runtime(...)
     for record in run.records:
         payload = generation_data(...)
         save_generation_to_file(payload, ...)

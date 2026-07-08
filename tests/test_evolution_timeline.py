@@ -33,11 +33,12 @@ from bsi_trap.evolve.physical_quantity import (
     threshold_radius,
 )
 from bsi_trap.evolve.tracks import append_bbh_track, finalize_bbh_tracks
-from bsi_trap.hierarchical.generations import (
-    evolve_hierarchical_generations,
-)
-from bsi_trap.hierarchical.remnants import HierarchicalMergerLedger
 from bsi_trap.initialization.trap_population import TrapPopulation
+from bsi_trap.runtime.evolution import (
+    TrapEvolutionRecord,
+    evolve_trap_runtime,
+)
+from bsi_trap.runtime.remnants import HierarchicalMergerLedger
 from bsi_trap.timeline.bsi import construct_bsi_timeline
 from bsi_trap.timeline.models import (
     BSI_Timeline,
@@ -754,7 +755,7 @@ class TestEvolutionProcess(TestCase):
         )
 
 
-class TestHierarchicalGenerationLoop(TestCase):
+class TestTrapRuntimeLoop(TestCase):
     def _embedded_population(
         self,
         masses_msun: list[float],
@@ -769,14 +770,19 @@ class TestHierarchicalGenerationLoop(TestCase):
         embedded_bh.t_reach_s[:] = reach_times_s
         embedded_bh.r_trap_target_cm[:] = 1.0e16
         embedded_bh.r_pair_cm[:] = 1.0e16
+        embedded_bh.trap_flag[:] = -2
+        singles = Single_BH_properties(len(masses_msun))
+        singles.m_msun[:] = masses_msun
+        singles.t_ini_s[:] = reach_times_s
+        singles.r_pair_cm[:] = 1.0e16
         return TrapPopulation(
             embedded_bh=embedded_bh,
             binaries=BBH_properties(0),
-            singles=Single_BH_properties(0),
+            singles=singles,
             pairing_timeline=PairingTimeline.empty(),
         )
 
-    def test_global_event_loop_recomputes_pairing_after_remnant_arrival(
+    def test_runtime_recomputes_pairing_after_remnant_arrival(
         self,
     ) -> None:
         initial_population = self._embedded_population(
@@ -789,6 +795,7 @@ class TestHierarchicalGenerationLoop(TestCase):
         remnant_singles.t_ini_s[:] = [5.0]
         remnant_singles.chi[:] = [0.7]
         remnant_singles.theta[:] = [0.0]
+        remnant_singles.generation[:] = [1]
 
         first_timeline = EvolutionTimeline(
             binary_idx=np.array([0], dtype=np.intp),
@@ -828,7 +835,7 @@ class TestHierarchicalGenerationLoop(TestCase):
         def fake_pairing(embedded_bh, *args, max_events=None, **kwargs):
             pairing_inputs.append(np.array(embedded_bh.m_msun, copy=True))
             self.assertEqual(max_events, 1)
-            if len(pairing_inputs) == 1:
+            if np.array_equal(embedded_bh.m_msun, [30.0, 20.0, 10.0]):
                 embedded_bh.trap_flag[:] = [1, 0, -2]
                 embedded_bh.t_pair_s[:] = [1.0, 1.0, np.nan]
                 return PairingTimeline(
@@ -839,6 +846,12 @@ class TestHierarchicalGenerationLoop(TestCase):
                     pair_delay_s=np.array([0.5]),
                     formation_s=np.array([1.0]),
                 )
+            if np.array_equal(embedded_bh.m_msun, [10.0]):
+                embedded_bh.trap_flag[:] = [-2]
+                embedded_bh.t_pair_s[:] = [np.nan]
+                return PairingTimeline.empty()
+            if embedded_bh.num == 0:
+                return PairingTimeline.empty()
             embedded_bh.trap_flag[:] = [1, 0]
             embedded_bh.t_pair_s[:] = [6.0, 6.0]
             return PairingTimeline(
@@ -850,26 +863,54 @@ class TestHierarchicalGenerationLoop(TestCase):
                 formation_s=np.array([6.0]),
             )
 
-        with (
-            mock.patch(
-                "bsi_trap.hierarchical.generations.construct_pairing_up_timeline",
-                side_effect=fake_pairing,
-            ) as pairing_mock,
-            mock.patch(
-                "bsi_trap.hierarchical.generations.make_generation",
-                side_effect=[
-                    gen_evolve.GenerationEvolutionResult(
+        def fake_advance(**kwargs):
+            active = kwargs["active"]
+            bbh = active.population.binaries
+            if active.record_index == 1:
+                bbh.t_del_s[:] = [4.0]
+                bbh.flags.merger_flag[:] = [1]
+                return 5.0
+            bbh.t_del_s[:] = [2.0]
+            bbh.flags.stop_reason_flag[:] = [StopReasons.STOP_AGN_LIFETIME]
+            return 8.0
+
+        def fake_finalize(**kwargs):
+            active = kwargs["active"]
+            if active.record_index == 1:
+                return TrapEvolutionRecord(
+                    record_index=1,
+                    generation=1,
+                    population=active.population,
+                    outcome=gen_evolve.GenerationEvolutionResult(
                         first_timeline,
                         first_ledger,
                     ),
-                    gen_evolve.GenerationEvolutionResult(
-                        second_timeline,
-                        HierarchicalMergerLedger.empty(),
-                    ),
-                ],
-            ) as generation_mock,
+                )
+            return TrapEvolutionRecord(
+                record_index=2,
+                generation=2,
+                population=active.population,
+                outcome=gen_evolve.GenerationEvolutionResult(
+                    second_timeline,
+                    HierarchicalMergerLedger.empty(),
+                ),
+            )
+
+        with (
+            mock.patch(
+                "bsi_trap.runtime.evolution.construct_pairing_up_timeline",
+                side_effect=fake_pairing,
+            ) as pairing_mock,
+            mock.patch(
+                "bsi_trap.runtime.evolution.advance_bbh_segment",
+                side_effect=fake_advance,
+            ),
+            mock.patch(
+                "bsi_trap.runtime.evolution._finalize_active_binary",
+                side_effect=fake_finalize,
+            ),
         ):
-            run = evolve_hierarchical_generations(
+            run = evolve_trap_runtime(
                 Evolparams=BBHEvolverParams(
                     rlist=np.array([1.0]),
                     sigmalist=np.array([1.0]),
@@ -886,16 +927,18 @@ class TestHierarchicalGenerationLoop(TestCase):
             )
 
         self.assertEqual(run.generation_count, 2)
-        self.assertEqual(pairing_mock.call_count, 2)
+        self.assertGreaterEqual(pairing_mock.call_count, 3)
         np.testing.assert_allclose(run.pairing_event_s, [1.0, 6.0])
         np.testing.assert_allclose(pairing_inputs[0], [30.0, 20.0, 10.0])
-        np.testing.assert_allclose(pairing_inputs[1], [10.0, 45.0])
-        second_bbh = generation_mock.call_args_list[1].kwargs["bbh"]
+        np.testing.assert_allclose(pairing_inputs[1], [10.0])
+        np.testing.assert_allclose(pairing_inputs[2], [10.0, 45.0])
+        second_bbh = run.records[1].population.binaries
         np.testing.assert_allclose(second_bbh.m1_msun, [45.0])
         np.testing.assert_allclose(second_bbh.m2_msun, [10.0])
+        np.testing.assert_array_equal(second_bbh.generation, [2])
 
-    def test_global_event_loop_records_empty_state_when_no_pair_forms(self) -> None:
-        run = evolve_hierarchical_generations(
+    def test_runtime_records_empty_state_when_no_pair_forms(self) -> None:
+        run = evolve_trap_runtime(
             Evolparams=BBHEvolverParams(
                 rlist=np.array([1.0]),
                 sigmalist=np.array([1.0]),

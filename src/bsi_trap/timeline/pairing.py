@@ -211,6 +211,7 @@ def construct_pairing_up_timeline(
     end_time_s: float,
     rng_pair_up: np.random.Generator,
     max_events: int | None = None,
+    start_time_s: float | None = None,
 ) -> PairingTimeline:
     """Construct BBH pairing events up to ``end_time_s``.
 
@@ -220,7 +221,7 @@ def construct_pairing_up_timeline(
     construction stops after that many committed pairings.
     """
 
-    ####### 1. Prepare for trap radius #######
+    ####### Prepare for trap radius #######
 
     # Get single BH reaching mask, and reaching timeline
     reached_mask = np.asarray(reached_mask, dtype=bool)
@@ -238,28 +239,35 @@ def construct_pairing_up_timeline(
         raise ValueError("SMBH mass must be finite and positive")
     if max_events is not None and max_events < 1:
         raise ValueError("max_events must be at least 1 when specified")
+    if start_time_s is not None and (
+        not np.isfinite(start_time_s) or start_time_s < 0.0
+    ):
+        raise ValueError("start_time_s must be finite and nonnegative when specified")
 
     if np.any(~np.isfinite(reached_times_s)) or np.any(reached_times_s < 0.0):
         raise ValueError("Reached BH arrival times must be finite and nonnegative")
     if np.any(embedded_bh.m_msun[reached_mask] <= 0.0):
         raise ValueError("Reached BH masses must be positive")
 
-    # Select reaching time below dutycycle
+    # 1. Select reaching time below dutycycle, for safety
     active_mask = reached_mask & (embedded_bh.t_reach_s < end_time_s)
 
-    embedded_bh.r_pair_cm[~active_mask] = np.nan
+    embedded_bh.r_pair_cm[~active_mask] = (
+        np.nan
+    )  # for inactive mask, set the pair radius to nan
 
+    # choose actual_task_mask for safety
     actual_task_mask = active_mask & ~np.isfinite(embedded_bh.r_pair_cm)
 
-    # Set random initial radius in the trap
+    # 2. Set random initial radius in the trap
     if np.any(actual_task_mask):
-        radial_scale_cm = (
-            model_config.trap_radial_dispersion_scale_heights
+        radial_sigma_cm = (
+            model_config.trap_radial_sigma_in_scale_height
             * disk.get_scale_height_cm(disk.r_trap_cm)
         )
 
         # safe check
-        if radial_scale_cm <= 0.0:
+        if radial_sigma_cm <= 0.0:
             raise ValueError("trap_radial_dispersion_scale_heights must be positive")
 
         centers_cm = np.where(
@@ -269,21 +277,25 @@ def construct_pairing_up_timeline(
         )
 
         # Normal distribution center offset
-        offsets_cm = rng_pair_up.normal(0.0, radial_scale_cm, actual_task_mask.sum())
+        offsets_cm = rng_pair_up.normal(0.0, radial_sigma_cm, actual_task_mask.sum())
         offsets_cm = np.clip(
             offsets_cm,
             -0.5 * trap_context.width_cm,
             0.5 * trap_context.width_cm,
         )
+        # centering plus offset
         embedded_bh.r_pair_cm[actual_task_mask] = centers_cm + offsets_cm
 
-    active_radii_cm = embedded_bh.r_pair_cm[active_mask]
+    active_radii_cm = embedded_bh.r_pair_cm[
+        active_mask
+    ]  # select the active radii into array
 
     if np.any(~np.isfinite(active_radii_cm)) or np.any(active_radii_cm <= 0.0):
         raise ValueError("Reached BH pairing radii must be finite and positive")
 
     embedded_bh.trap_flag.fill(-1)
     embedded_bh.trap_flag[active_mask] = -2
+
     embedded_bh.t_pair_s.fill(np.nan)
 
     arrival_idx = np.flatnonzero(active_mask)
@@ -302,8 +314,10 @@ def construct_pairing_up_timeline(
     pair_delays_s: list[float] = []
     formation_times_s: list[float] = []
 
-    # Step current time for constructing timeline
+    # Step current time for constructing timeline.
     current_time_s = float(embedded_bh.t_reach_s[arrival_idx[0]])
+    if start_time_s is not None:
+        current_time_s = max(current_time_s, float(start_time_s))
 
     def process_until(time_limit_s: float) -> bool:
 
@@ -359,7 +373,15 @@ def construct_pairing_up_timeline(
                 return True
         return False
 
-    for index in arrival_idx:
+    arrival_position = 0
+    while (
+        arrival_position < arrival_idx.size
+        and embedded_bh.t_reach_s[arrival_idx[arrival_position]] <= current_time_s
+    ):
+        waiting_idx.append(int(arrival_idx[arrival_position]))
+        arrival_position += 1
+
+    for index in arrival_idx[arrival_position:]:
         arrival_time_s = float(embedded_bh.t_reach_s[index])
         if process_until(arrival_time_s):
             break

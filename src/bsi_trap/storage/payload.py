@@ -13,7 +13,7 @@ from bsi_trap.classes.models import AGN_properties, BBH_properties, DiskProfile
 from bsi_trap.config.model_config import ModelConfig
 from bsi_trap.constant import constant as const
 from bsi_trap.timeline.models import EvolutionTimeline
-from bsi_trap.hierarchical.remnants import HierarchicalMergerLedger
+from bsi_trap.runtime.remnants import HierarchicalMergerLedger
 from bsi_trap.initialization.trap_population import TrapPopulation
 
 from .contract import HDF5Contract
@@ -82,6 +82,7 @@ def bbh_data(
         "chimerg": bbh.chimerg,
         "chirem": bbh.chirem,
         "vk_cgs": bbh.vk_cgs,
+        "generation": bbh.generation,
         "trapreach_time_s": bbh.t_ini_s,
         "bsi_timescale_s": bbh.bsi_timescale_s,
         "bsi_weak_count": bbh.bsi_weak_count,
@@ -173,6 +174,7 @@ def trap_population_data(
             "chi": singles.chi,
             "theta": singles.theta,
             "t_ini_s": singles.t_ini_s,
+            "generation": singles.generation,
         },
     }
 
@@ -197,6 +199,7 @@ def hierarchical_merger_data(
         "next_generation_singles": {
             "m_msun": singles.m_msun,
             "t_ini_s": singles.t_ini_s,
+            "generation": singles.generation,
         },
     }
 

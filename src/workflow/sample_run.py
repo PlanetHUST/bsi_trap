@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
-import numpy as np
 
 from bsi_trap.classes.models import (
     BBHEvolverParams,
@@ -11,11 +10,11 @@ from bsi_trap.classes.models import (
 )
 
 from bsi_trap.config.model_config import ModelConfig
-from bsi_trap.hierarchical.generations import evolve_hierarchical_generations
 from bsi_trap.initialization.environment import make_environment
 from bsi_trap.initialization.trap_population import (
     make_trap_population,
 )
+from bsi_trap.runtime.evolution import evolve_trap_runtime
 from bsi_trap.config.rng import resolve_seed, make_rng_streams
 from bsi_trap.storage.contract import HDF5Contract
 from bsi_trap.storage.payload import (
@@ -94,11 +93,7 @@ def run_physics_sample(
         model_config=model_config,
         agn=agn,
         disk=disk,
-        rng_pair_up=rng.pair_up,
         rng_nsc=rng.nsc,
-        rng_orbit=rng.dynamics,
-        rng_spin=rng.spin,
-        pair_initial=False,
     )
     _progress(
         sample_index,
@@ -109,17 +104,7 @@ def run_physics_sample(
         f"single={population.singles.num}",
     )
 
-    # 4. Binary evolve to mergers
-    population.binaries.sma_initial_cm = np.array(
-        population.binaries.sma_cm,
-        copy=True,
-    )
-    population.binaries.ecc_initial = np.array(
-        population.binaries.ecc,
-        copy=True,
-    )
-
-    hierarchical_run = evolve_hierarchical_generations(
+    runtime_run = evolve_trap_runtime(
         Evolparams=_evolver_params(disk),
         model_config=model_config,
         agn=agn,
@@ -130,22 +115,22 @@ def run_physics_sample(
         rng_spin=rng.spin,
     )
 
-    final_record = hierarchical_run.final_record
-    evolved_binary_count = hierarchical_run.evolved_binary_count
-    merger_count = hierarchical_run.merger_count
-    generation_count = hierarchical_run.generation_count
+    final_record = runtime_run.final_record
+    evolved_binary_count = runtime_run.evolved_binary_count
+    merger_count = runtime_run.merger_count
+    generation_count = runtime_run.generation_count
 
     _progress(
         sample_index,
         model_config.simulation_type,
-        "evolved generations: "
+        "evolved trap events: "
         f"count={generation_count}, binaries={evolved_binary_count}, "
         f"mergers={merger_count}",
     )
     _progress(
         sample_index,
         model_config.simulation_type,
-        "final hierarchical remnants: "
+        "final merger remnants: "
         f"retained={final_record.outcome.hierarchical_mergers.retained_count}, "
         f"escaped={final_record.outcome.hierarchical_mergers.escaped_count}, "
         f"recycled={final_record.outcome.hierarchical_mergers.recycled_count}",
@@ -155,7 +140,7 @@ def run_physics_sample(
     output_files: list[Path] = []
     contract = HDF5Contract(root_dir=output_file.parent)
     final_state: GenerationState | None = None
-    for record in hierarchical_run.records:
+    for record in runtime_run.records:
         state = GenerationState(
             agn=agn,
             disk=disk,
@@ -167,7 +152,7 @@ def run_physics_sample(
         saved_path = save_generation_to_file(
             simulation_type=model_config.simulation_type,
             sample_index=sample_index,
-            generation=record.generation,
+            generation=record.record_index,
             generation_data=generation_data(
                 model_config=model_config,
                 state=state,

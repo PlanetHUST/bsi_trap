@@ -22,8 +22,8 @@ class ModelConfig:
     # Initial trap geometry in units of the local gas scale height. These are
     # explicit model parameters so the pairing density is never hard-coded.
     trap_width_scale_heights: float = 1.0
-    compact_object_scale_height_fraction: float = 1.0
-    trap_radial_dispersion_scale_heights: float = 0.25
+    object_scale_height_fraction: float = 1.0
+    trap_radial_sigma_in_scale_height: float = 0.25
     max_generations: int = 4
 
     master_seed: int | None = 20260611

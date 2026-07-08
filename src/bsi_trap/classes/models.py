@@ -125,11 +125,11 @@ class TorqueProfile:
 
 class Embedded_BH(object):
     """
-    ``trap_flag`` records the state after initial pairing:
-    ``-1`` did not reach the trap, ``-2`` reached but remains single, and a
-    non-negative value is the index of the selected binary companion.
-    ``t_pair_s`` is the shared BBH formation time for paired entries and NaN
-    for all others.
+    ``trap_flag`` records trap membership:
+    ``-1`` did not reach the trap, ``-2`` reached and is available as a single,
+    and a non-negative value is the index of a selected binary companion.
+    ``t_pair_s`` is the shared BBH formation time for paired entries and NaN for
+    all others.
     """
 
     def __init__(self, num: int):
@@ -199,6 +199,7 @@ class BBH_properties(object):
         self.chirem = np.zeros(num, float)
         self.chimerg = self.chirem
         self.vk_cgs = np.zeros(num, float)  # kick velocity
+        self.generation = np.zeros(num, dtype=np.int64)
 
         self.t_ini_s = np.zeros(num, float)
         self.t_del_s = np.zeros(num, float)
@@ -221,6 +222,15 @@ class BBH_properties(object):
         self._track_ecc_chunks: list[FloatArray] = []
         self.flags = BBH_flags(num)
 
+    @property
+    def formation_s(self) -> FloatArray:
+        """Absolute BBH formation time."""
+        return self.t_ini_s
+
+    @formation_s.setter
+    def formation_s(self, values: npt.ArrayLike) -> None:
+        self.t_ini_s = np.asarray(values, dtype=float)
+
 
 class Single_BH_properties(object):
     "single BH population properties in the trap"
@@ -232,6 +242,16 @@ class Single_BH_properties(object):
         self.chi = np.full(num, np.nan, float)
         self.theta = np.full(num, np.nan, float)
         self.r_pair_cm = np.full(num, np.nan, float)
+        self.generation = np.zeros(num, dtype=np.int64)
+
+    @property
+    def available_from_s(self) -> FloatArray:
+        """Absolute time when each single BH is available in the trap."""
+        return self.t_ini_s
+
+    @available_from_s.setter
+    def available_from_s(self, values: npt.ArrayLike) -> None:
+        self.t_ini_s = np.asarray(values, dtype=float)
 
 
 class BBHEvolverParams:

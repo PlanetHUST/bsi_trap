@@ -20,7 +20,7 @@ from bsi_trap.constant.stop_reason import StopReasons
 from bsi_trap.evolve import numeric
 from bsi_trap.evolve import physical_quantity as pq
 from bsi_trap.constant import constant as const
-from bsi_trap.hierarchical.remnants import (
+from bsi_trap.runtime.remnants import (
     HierarchicalMergerLedger,
     build_hierarchical_mergers,
 )
@@ -136,6 +136,8 @@ def evolve_single_binary(
     disk: DiskProfile,
     bbh: BBH_properties,
     i: int,
+    *,
+    segment_stop_s: float | None = None,
 ) -> float:
     """Evolve one BBH and return the delay from BBH formation to termination."""
 
@@ -157,6 +159,7 @@ def evolve_single_binary(
             agn,
             i,
             bsi_enabled=model_config.bsi_enabled,
+            segment_stop_s=segment_stop_s,
         )
 
     elif model_config.gas_mode == "without_gas":
@@ -167,6 +170,7 @@ def evolve_single_binary(
             i,
             t_ini_s,
             bsi_enabled=model_config.bsi_enabled,
+            segment_stop_s=segment_stop_s,
         )
 
     else:

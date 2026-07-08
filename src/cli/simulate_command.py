@@ -96,10 +96,8 @@ def run_simulate_command(args: argparse.Namespace) -> None:
             bsi_eta=args.bsi_eta,
             pair_up_eta=args.pair_up_eta,
             trap_width_scale_heights=args.trap_width_scale_heights,
-            compact_object_scale_height_fraction=(
-                args.compact_object_scale_height_fraction
-            ),
-            trap_radial_dispersion_scale_heights=(
+            object_scale_height_fraction=(args.compact_object_scale_height_fraction),
+            trap_radial_sigma_in_scale_height=(
                 args.trap_radial_dispersion_scale_heights
             ),
             max_generations=args.max_generations,

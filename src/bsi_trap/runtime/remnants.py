@@ -107,6 +107,7 @@ def _make_next_generation_singles(
     remnant_mass_msun: FloatArray,
     remnant_spin: FloatArray,
     merger_s: FloatArray,
+    source_generation: IndexArray,
     recycled: BoolArray,
 ) -> Single_BH_properties:
     singles = Single_BH_properties(int(np.count_nonzero(recycled)))
@@ -114,7 +115,8 @@ def _make_next_generation_singles(
         return singles
 
     singles.m_msun = np.asarray(remnant_mass_msun[recycled], dtype=np.float64)
-    singles.t_ini_s = np.asarray(merger_s[recycled], dtype=np.float64)
+    singles.available_from_s = np.asarray(merger_s[recycled], dtype=np.float64)
+    singles.generation = np.asarray(source_generation[recycled], dtype=np.int64)
     recycled_spin = np.asarray(remnant_spin[recycled], dtype=np.float64)
     singles.chi = np.abs(recycled_spin)
     singles.theta = np.where(recycled_spin >= 0.0, 0.0, np.pi).astype(np.float64)
@@ -134,7 +136,7 @@ def build_hierarchical_mergers(
     The BBH evolution integrator decides whether a binary merges.  This
     function handles the post-merger AGN step: final mass/spin, GW recoil,
     retention in the disk potential, and whether a retained remnant can be
-    recycled as a single object for a later hierarchical generation.
+    recycled as a higher-generation single object.
     """
     source_binary_idx = np.flatnonzero(bbh.flags.merger_flag != 0).astype(np.intp)
     if source_binary_idx.size == 0:
@@ -219,6 +221,7 @@ def build_hierarchical_mergers(
             remnant_mass_msun,
             remnant_spin,
             merger_s,
+            np.asarray(bbh.generation[source_binary_idx], dtype=np.intp),
             recycled,
         ),
     )

@@ -15,25 +15,25 @@ SMBH mass + ModelConfig + seed
     -> embedded BH reservoir
     -> mass-dependent migration toward trap targets
     -> migration-only trap-arrival population
-    -> chronological pairing/remnant event scheduler
-    -> one committed BBH population per accepted pairing event
+    -> top-level trap runtime event loop
+    -> pair scheduler kernel and active BBH segment evolution
     -> BBH orbital/spin initialization
     -> BBH gas/GW evolution with optional weak BSI perturbations
     -> merger/remnant/kick/retention processing
-    -> HDF5 event records and compact timeline plots
+    -> HDF5 runtime-event records and compact timeline plots
 ```
 
-The current code now has a top-level event loop for trap pairing and
-hierarchical remnant recycling.  It is still not a fully coupled many-body or
-active-BBH scheduler: once a BBH is committed, `make_generation()` evolves that
-committed population, and BSI is scheduled from the live single reservoir
-available at that boundary.  The staged contract is:
+The current code now has a top-level event loop for trap pairing, active BBH
+segments, and remnant recycling.  The runtime state owns the live single
+reservoir, active BBHs, current time, and an event ledger.  The staged contract
+is:
 
 - initialization builds migration and trap-arrival state;
-- the hierarchical scheduler repeatedly asks pairing for the next accepted pair;
+- the runtime asks pairing for the next accepted pair from the live singles;
+- active BBHs evolve only to the next global boundary;
 - retained merger remnants are returned to the live single reservoir;
-- BBH evolution evolves each committed binary from its formation time;
-- BSI is a scheduled weak perturbation applied inside the binary evolution;
+- retained remnants carry generation tags and can pair again as live singles;
+- BSI is a scheduled weak perturbation applied inside the BBH segment kernel;
 - timelines record event times and outcomes;
 - storage writes the final state plus event ledgers.
 
@@ -127,8 +127,8 @@ The strongest parts of the current workflow are:
   formation time.
 - The local pair-up model uses persistent sampled trap radii and local
   eligibility rather than a fully mixed one-zone reservoir.
-- The hierarchy layer owns the chronological pairing/remnant feedback loop
-  instead of relying on a fixed generation cap.
+- The runtime layer owns the chronological pairing, active-BBH, and remnant
+  feedback loop instead of relying on a fixed generation cap.
 - BBH evolution stores accepted trajectory states in `bbh_tracks`, so plots can
   show real evolution paths instead of only initial/final points.
 - BBH evolution policy is centralized in `BBHEvolverParams`, reducing hidden
@@ -148,11 +148,12 @@ forcing storage, plotting, or binary integration to own scheduler policy.
 The next tasks should be ordered by physical importance and by how much they
 change the workflow contract.
 
-1. Build a shared active-BBH/BSI event queue.
+1. Extend the shared runtime clock around detailed BSI events.
 
-   Pairing and retained-remnant recycling now happen on one chronological
-   reservoir.  The next framework step is to put active BBHs, smooth evolution
-   boundaries, scheduled BSI, and merger processing on one shared clock:
+   Pairing, active BBH evolution boundaries, merger processing, and retained
+   remnant recycling now happen on one chronological runtime.  The next
+   framework step is to expose scheduled BSI events as first-class runtime
+   events instead of applying them only inside the BBH segment kernel:
 
    ```text
    inject newly reached singles
@@ -192,8 +193,9 @@ but it should not be read as the final AGN trap population simulation.
 
 Important caveats:
 
-- Pairing and retained-remnant feedback use one live single reservoir, but
-  active BBHs and BSI events are not yet evolved in the same shared event queue.
+- Pairing, active BBHs, and retained-remnant feedback use one runtime clock, but
+  scheduled BSI events are still applied inside each BBH segment rather than
+  represented as standalone top-level events.
 - Pair-up is local and event-driven, but still phase-averaged.  It is not a
   resolved N-body calculation.
 - BSI is weak-only.  Ionization, ejection, and exchange are intentionally not

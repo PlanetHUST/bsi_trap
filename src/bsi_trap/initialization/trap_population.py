@@ -13,10 +13,9 @@ from bsi_trap.classes.models import (
 )
 from bsi_trap.config.model_config import ModelConfig
 from bsi_trap.constant.constant import Myr
-from bsi_trap.initialization.bbh_parameters import BBH_params_initialize
 from bsi_trap.initialization.embedded_bh import embedded_BH_initialize
 from bsi_trap.evolve.trap_migration import (
-    resolve_mass_dependent_trap_migration,
+    resolve_migration,
 )
 from bsi_trap.evolve.trap_context import build_trap_context
 from bsi_trap.timeline.models import PairingTimeline
@@ -25,6 +24,8 @@ from bsi_trap.timeline.pairing import construct_pairing_up_timeline
 
 @dataclass(frozen=True)
 class TrapPopulation:
+    """Trap-arrival state plus optional committed BBHs for diagnostics."""
+
     embedded_bh: Embedded_BH
     binaries: BBH_properties
     singles: Single_BH_properties
@@ -35,52 +36,30 @@ def make_trap_population(
     model_config: ModelConfig,
     agn: AGN_properties,
     disk: DiskProfile,
-    rng_pair_up: np.random.Generator,
     rng_nsc: np.random.Generator,
-    rng_orbit: np.random.Generator,
-    rng_spin: np.random.Generator,
-    pair_initial: bool = True,
 ) -> TrapPopulation:
-    """Build the embedded, binary, and single BH trap populations."""
-    embedded_bh = embedded_BH_initialize(agn, disk, rng_nsc)
-    if not pair_initial:
-        prepare_trap_arrival_state(
-            model_config=model_config,
-            agn=agn,
-            disk=disk,
-            ebh=embedded_bh,
-        )
-        return TrapPopulation(
-            embedded_bh=embedded_bh,
-            binaries=BBH_properties(0),
-            singles=init_sbh(embedded_bh),
-            pairing_timeline=PairingTimeline.empty(),
-        )
+    """Build the embedded-BH trap-arrival reservoir.
 
-    binaries, singles, pairing_timeline = construct_initial_trap_population(
+    Reaching the trap only makes an object available as a single BH. Pairing is
+    committed later by the runtime event loop on the shared event clock.
+    """
+
+    embedded_bh = embedded_BH_initialize(agn, disk, rng_nsc)
+    prepare_trap_arrival_state(
         model_config=model_config,
         agn=agn,
         disk=disk,
         ebh=embedded_bh,
-        rng_pair_up=rng_pair_up,
-    )
-    BBH_params_initialize(
-        agn=agn,
-        disk=disk,
-        bbh=binaries,
-        rng_orbit=rng_orbit,
-        rng_spin=rng_spin,
-        model_config=model_config,
     )
     return TrapPopulation(
         embedded_bh=embedded_bh,
-        binaries=binaries,
-        singles=singles,
-        pairing_timeline=pairing_timeline,
+        binaries=BBH_properties(0),
+        singles=init_sbh(embedded_bh),
+        pairing_timeline=PairingTimeline.empty(),
     )
 
 
-def _validate_embedded_population(ebh: Embedded_BH) -> None:
+def _validate_embedded(ebh: Embedded_BH) -> None:
     """Check the array contract required before migration and pairing."""
     expected_shape = (ebh.num,)
     for name in ("m_msun", "t_form_s", "R_cm"):
@@ -126,19 +105,23 @@ def prepare_trap_arrival_state(
     ebh: Embedded_BH,
 ) -> np.ndarray:
     """Resolve migration and mark reached trap objects as live singles."""
-    _validate_embedded_population(ebh)
+
+    _validate_embedded(ebh)
 
     end_time_s = agn.lifetime_myr * Myr
+
     if not np.isfinite(end_time_s) or end_time_s <= 0.0:
         raise ValueError("AGN lifetime must define a finite, positive end time")
 
-    migration_results = resolve_mass_dependent_trap_migration(
+    migration_results = resolve_migration(
         agn=agn,
         disk=disk,
         ebh=ebh,
     )
+
     migration_times_s = migration_results.migration_times_s
 
+    # check
     if migration_times_s.shape != (ebh.num,):
         raise ValueError("Migration solver returned an invalid population shape")
     if np.any(np.isnan(migration_times_s)) or np.any(migration_times_s < 0.0):
@@ -151,11 +134,16 @@ def prepare_trap_arrival_state(
     ebh.r_trap_target_cm = migration_results.target_radii_cm
 
     reached_mask = migration_results.stable_mask & (ebh.t_reach_s < end_time_s)
+
     trap_context = build_trap_context(disk, model_config)
+
     ebh.trap_width_cm = trap_context.width_cm
+
     ebh.trap_flag.fill(-1)
     ebh.trap_flag[reached_mask] = -2
-    ebh.t_pair_s.fill(np.nan)
+
+    ebh.t_pair_s.fill(np.nan)  # now set to be nan
+
     return reached_mask
 
 
@@ -169,6 +157,7 @@ def construct_initial_trap_population(
     """Build first-generation BBH/single populations and their pairing timeline."""
 
     end_time_s = agn.lifetime_myr * Myr
+
     reached_mask = prepare_trap_arrival_state(
         model_config=model_config,
         agn=agn,
@@ -240,7 +229,7 @@ def init_bbh(ebh: Embedded_BH) -> BBH_properties:
     bbh.idi = primary_idx
     bbh.m1_msun = ebh.m_msun[primary_idx]
     bbh.m2_msun = ebh.m_msun[secondary_idx]
-    bbh.t_ini_s = formation_times_s
+    bbh.formation_s = formation_times_s
 
     primary_has_spin = np.isfinite(ebh.chi[primary_idx]) & np.isfinite(
         ebh.theta[primary_idx]
@@ -260,7 +249,7 @@ def init_sbh(ebh: Embedded_BH) -> Single_BH_properties:
     single_idx = np.flatnonzero(ebh.trap_flag == -2)
     sbh = Single_BH_properties(single_idx.size)
     sbh.m_msun = np.array(ebh.m_msun[single_idx], copy=True)
-    sbh.t_ini_s = np.array(ebh.t_reach_s[single_idx], copy=True)
+    sbh.available_from_s = np.array(ebh.t_reach_s[single_idx], copy=True)
     sbh.chi = np.array(ebh.chi[single_idx], copy=True)
     sbh.theta = np.array(ebh.theta[single_idx], copy=True)
     sbh.r_pair_cm = np.array(ebh.r_pair_cm[single_idx], copy=True)

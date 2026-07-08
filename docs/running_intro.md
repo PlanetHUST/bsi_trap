@@ -243,8 +243,9 @@ The current workflow can:
 - Sample an embedded BH population and assign formation times and radii.
 - Resolve mass-dependent migration targets and trap-arrival times.
 - Build a migration-only trap-arrival population for the main workflow.
-- Use the hierarchical scheduler to request the next accepted local pair,
-  including retained merger remnants returned to the live single reservoir.
+- Use the runtime event loop to request the next accepted local pair, advance
+  active BBHs to the next boundary, and return retained merger remnants to the
+  live single reservoir.
 - Store the pairing timeline: later arrival, encounter time, pair-up delay, and
   BBH formation time.
 - Initialize each committed BBH population's orbital and spin parameters.
@@ -329,7 +330,8 @@ src/cli/simulate_command.py
 src/bsi_trap/initialization/environment.py
 src/bsi_trap/initialization/trap_population.py
 src/bsi_trap/timeline/
-src/bsi_trap/hierarchical/generations.py
+src/bsi_trap/runtime/evolution.py
+src/bsi_trap/runtime/remnants.py
 src/bsi_trap/evolve/gen_evolve.py
 src/bsi_trap/evolve/binary_evolution.py
 src/bsi_trap/evolve/bsi.py
