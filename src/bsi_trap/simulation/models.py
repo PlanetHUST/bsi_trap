@@ -74,12 +74,18 @@ class EmbeddedPopulation:
 @dataclass(frozen=True)
 class ArrivalTimeline:
     arrival_s: np.ndarray
+    mass_msun: np.ndarray
     reached_mask: np.ndarray
     order: np.ndarray
 
     @property
     def reached_count(self) -> int:
         return int(np.count_nonzero(self.reached_mask))
+
+    def select_ind(self, current_time_s: float) -> np.intp:
+        select_mask = self.arrival_s > current_time_s
+        select_order = self.order[select_mask]
+        return select_order.min()
 
 
 @dataclass(frozen=True)

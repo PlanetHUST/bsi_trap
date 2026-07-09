@@ -14,15 +14,14 @@ from bsi_trap.physics.evolution import (
     apply_bsi_perturbation,
     binary_single_delay_s,
     build_binary_population,
-    evolve_bbh_population,
+    evolve_kernal,
     gas_hardening_time_s,
     gw_merger_time_s,
     merge_remnant,
     merger_radius_cm,
 )
-from bsi_trap.physics.pairing import construct_pairing_timeline, pair_delay_s
+from bsi_trap.physics.pairing import pairing_kernal, pair_delay_s
 from bsi_trap.physics.population import construct_arrivals, sample_embedded_population
-
 
 __all__ = [
     "apply_bsi_perturbation",
@@ -30,8 +29,8 @@ __all__ = [
     "build_disk_profile",
     "build_binary_population",
     "construct_arrivals",
-    "construct_pairing_timeline",
-    "evolve_bbh_population",
+    "pairing_kernal",
+    "evolve_kernal",
     "gas_hardening_time_s",
     "gw_merger_time_s",
     "merge_remnant",

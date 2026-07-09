@@ -97,9 +97,7 @@ def gas_hardening_time_s(
     )
     if not np.isfinite(coeff) or coeff <= 0.0:
         return np.inf
-    return float(
-        2.0 / (3.0 * coeff) * (r_merge**-1.5 - semi_major_axis_cm**-1.5)
-    )
+    return float(2.0 / (3.0 * coeff) * (r_merge**-1.5 - semi_major_axis_cm**-1.5))
 
 
 def _trap_volume_cm3(disk: DiskProfile) -> float:
@@ -140,9 +138,7 @@ def binary_single_delay_s(
     focusing = 1.0 + 2.0 * G * (binary_mass_g + single_mass_g) / (
         p_max_cm * v_inf_cm_s**2
     )
-    rate_s_inv = float(
-        np.sum(np.pi * p_max_cm**2 * focusing * v_inf_cm_s) / volume_cm3
-    )
+    rate_s_inv = float(np.sum(np.pi * p_max_cm**2 * focusing * v_inf_cm_s) / volume_cm3)
     if not np.isfinite(rate_s_inv) or rate_s_inv <= 0.0:
         return np.inf
     return 1.0 / rate_s_inv
@@ -180,7 +176,7 @@ def _single_background_for_binary(
     return population.mass_msun[active]
 
 
-def evolve_bbh_population(
+def evolve_kernal(
     config: DemoConfig,
     disk: DiskProfile,
     population: EmbeddedPopulation,
@@ -269,7 +265,7 @@ __all__ = [
     "apply_bsi_perturbation",
     "binary_single_delay_s",
     "build_binary_population",
-    "evolve_bbh_population",
+    "evolve_kernal",
     "gas_hardening_time_s",
     "gw_merger_time_s",
     "merge_remnant",

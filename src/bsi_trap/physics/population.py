@@ -40,11 +40,15 @@ def construct_arrivals(
     """Assign simple mass-dependent migration times to the trap."""
     distance = np.abs(np.log(population.initial_radius_cm / disk.r_trap_cm))
     mass_factor = 10.0 / np.maximum(population.mass_msun, 1.0e-12)
+    # simple migration timescale version here
     migration_s = config.migration_time_myr * MYR * (0.15 + distance) * mass_factor
+    # ignore formation timescale here
     reached_mask = migration_s <= config.agn_lifetime_myr * MYR
     reached_idx = np.flatnonzero(reached_mask)
     order = reached_idx[np.argsort(migration_s[reached_idx], kind="stable")]
-    return ArrivalTimeline(migration_s, reached_mask, order.astype(np.intp))
+    return ArrivalTimeline(
+        migration_s, population.mass_msun, reached_mask, order.astype(np.intp)
+    )
 
 
 __all__ = ["construct_arrivals", "sample_embedded_population"]

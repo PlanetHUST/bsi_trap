@@ -8,6 +8,7 @@ import numpy as np
 
 from bsi_trap.dataoi.catalog import DEFAULT_CATALOG
 from bsi_trap.simulation.models import DemoConfig, DemoResult
+from bsi_trap.units import MYR
 
 
 def validate_config(config: DemoConfig) -> None:
@@ -48,8 +49,8 @@ def run_simulation(
     from bsi_trap.physics import (
         build_disk_profile,
         construct_arrivals,
-        construct_pairing_timeline,
-        evolve_bbh_population,
+        pairing_kernal,
+        evolve_kernal,
         sample_embedded_population,
     )
 
@@ -57,19 +58,24 @@ def run_simulation(
     disk = build_disk_profile(config)
     population = sample_embedded_population(config, disk, rng, catalog_path)
     arrivals = construct_arrivals(config, disk, population)
-    pairing, paired_mask = construct_pairing_timeline(
-        config,
-        disk,
-        population,
-        arrivals,
-    )
-    binaries, evolution = evolve_bbh_population(
-        config,
-        disk,
-        population,
-        arrivals,
-        pairing,
-    )
+    current_time_s = 0
+    end_time_s = config.agn_lifetime_myr * MYR
+
+    while current_time_s < end_time_s:
+        pairing, paired_mask = pairing_kernal(
+            current_time_s,
+            config,
+            disk,
+            population,
+            arrivals,
+        )
+        binaries, evolution = evolve_kernal(
+            config,
+            disk,
+            population,
+            arrivals,
+            pairing,
+        )
     return DemoResult(
         config,
         disk,

@@ -18,58 +18,58 @@ def pair_delay_s(disk: DiskProfile, m1_msun: float, m2_msun: float) -> float:
     total_mass_g = (m1_msun + m2_msun) * MSUN
     density_g_cm3 = disk.trap_sigma_g_cm2 / (2.0 * disk.trap_scale_height_cm)
     return float(
-        3.0
-        * disk.trap_cs_cm_s**3
-        / (4.0 * np.pi * G**2 * density_g_cm3 * total_mass_g)
+        3.0 * disk.trap_cs_cm_s**3 / (4.0 * np.pi * G**2 * density_g_cm3 * total_mass_g)
     )
 
 
-def construct_pairing_timeline(
+def cal_pair_value(
+    config: DemoConfig,
+    disk: DiskProfile,
+    first_mass_msun: float,
+    second_mass_msun: float,
+    rng: np.random.Generator,
+) -> float:
+    smbh_mass_g = config.smbh_mass_msun * MSUN
+    r_trap_cm = disk.r_trap_cm
+    radius_hill = (
+        np.sqrt((first_mass_msun + second_mass_msun) * MSUN / smbh_mass_g) * r_trap_cm
+    )
+    return rng.uniform(0, 1 / radius_hill) * radius_hill
+
+
+def pairing_kernal(
+    current_time_s: float,
     config: DemoConfig,
     disk: DiskProfile,
     population: EmbeddedPopulation,
     arrivals: ArrivalTimeline,
+    rng: np.random.Generator,
 ) -> tuple[PairingTimeline, np.ndarray]:
-    """Pair reached singles in arrival order for one demo generation."""
     end_s = config.agn_lifetime_myr * MYR
-    paired_mask = np.zeros(population.size, dtype=bool)
-    first_idx: list[int] = []
-    second_idx: list[int] = []
-    later_arrival_s: list[float] = []
-    pair_delay_values_s: list[float] = []
-    formation_s: list[float] = []
+    arrived_inds = []
 
-    for cursor in range(0, arrivals.order.size - 1, 2):
-        first = int(arrivals.order[cursor])
-        second = int(arrivals.order[cursor + 1])
-        later_arrival = float(max(arrivals.arrival_s[first], arrivals.arrival_s[second]))
-        delay = (
-            pair_delay_s(
-                disk,
-                float(population.mass_msun[first]),
-                float(population.mass_msun[second]),
-            )
-            * config.pair_delay_scale
-        )
-        formation = later_arrival + delay
-        if formation > end_s:
+    pair_flag = False
+    pair_value = 0
+
+    while (not pair_flag) & (current_time_s < end_s):
+        next_arrival_ind = arrivals.select_ind(current_time_s)
+        arrived_inds.append(next_arrival_ind)
+        if len(arrived_inds) < 2:
+            current_time_s = arrivals.arrival_s[next_arrival_ind]
             continue
-        paired_mask[first] = True
-        paired_mask[second] = True
-        first_idx.append(first)
-        second_idx.append(second)
-        later_arrival_s.append(later_arrival)
-        pair_delay_values_s.append(delay)
-        formation_s.append(formation)
-
-    timeline = PairingTimeline(
-        first_idx=np.asarray(first_idx, dtype=np.intp),
-        second_idx=np.asarray(second_idx, dtype=np.intp),
-        later_arrival_s=np.asarray(later_arrival_s, dtype=float),
-        pair_delay_s=np.asarray(pair_delay_values_s, dtype=float),
-        formation_s=np.asarray(formation_s, dtype=float),
-    )
-    return timeline, paired_mask
+        first_one = rng.choice(arrived_inds)
+        second_one = rng.choice(arrived_inds)
+        pair_value = cal_pair_value(
+            config,
+            disk,
+            arrivals.mass_msun[first_one],
+            arrivals.mass_msun[second_one],
+            rng,
+        )
+        pair_flag = pair_value > 0.9
+        current_time_s += pair_delay_s(
+            disk,
+        )
 
 
-__all__ = ["construct_pairing_timeline", "pair_delay_s"]
+__all__ = ["pairing_kernal", "pair_delay_s"]
