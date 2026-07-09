@@ -78,54 +78,10 @@ large density of BHs in the trap, after calculate the binary and single populati
 
 ## General consideration
 
-- generate alternative simulating channels $(A, B, C,\dots)$;
+- trap population consideration
 
-    model_config.py, sets considering variables.
-    1. damp, linear, log
-    2. gas hardening, no gas hardening
-    3. torque derived migration, first order simplified migration
-    4. pair up $\dots$
-    5. binary-single interaction $\dots$
+- unified timeline view
 
-- parallel computatation for results (MC simulation for each sampling).
-
-    >physical_simulation/
-    - initialize.py
-    - hierachical_merger.py
-    - binary_evolve.py
-    - storage.py
-    - classes.py
-    - agn_function.py
-
-    >physical_simulation/disk_profile/
-    - pagn_adapter.py
-    - migration_torque.py 
-
-
-- merger-remnant data storage, rather than add them all for statistics, view smbh mass dependence
-
-    physical quantities relevant to observation: 
-    1. absolute merge time during the simulaion $t_{\rm merg}$
-    2. masses, $m_1, m_2, m_{\rm rem}$
-    3. spins modula and theta
-    4. eccentricity at one certain frequency
-
-    others are derived quantities; neat storage .hdf5 file logic, channel-sample-data
-
-- data analysis for plot
-
-- simulation workflow
-    > run_physics_sample()
-
-        1. build AGN/disk
-        2. build embedded BH population
-        3. prepare migration-only trap-arrival population
-        4. run chronological pairing/remnant scheduler
-        5. initialize each committed BBH population
-        6. evolve BBHs with gas/GW and runtime-selected weak BSI
-        7. construct pairing/evolution/BSI/remnant ledgers
-        8. return retained remnants to the live single reservoir
-        9. save generation HDF5 payloads and sample metadata
 
 ---
 
@@ -133,58 +89,16 @@ _timeline_ logs the discrete evlotion time line for each *pair-up binary*
 
 the most important part in the evolution workflow 
 
-|            | discrete process                     | continue process |
-| ---------- | ------------------------------------ | ---------------- |
-| for binary | runtime BSI perturbation; merge; pair-up formation | gas/GW evolution |
-| for single | to pair-up                           | reservoir waiting |
+|            | discrete process                                   | continue process  |
+| ---------- | -------------------------------------------------- | ----------------- |
+| for binary | runtime BSI perturbation; merge; pair-up formation | gas/GW evolution  |
+| for single | to pair-up                                         | reservoir waiting |
 
 ## It's important to make one demo evolution part
 
 ---
 
 ## Naive workflow
-
-```python
-def evolve_population_with_timeline(...):
-    t = 0.0
-    timeline.record_population_start(...)
-    while t < agn.lifetime_s:
-        active = get_active_bbh_indices(bbh)
-        dt = choose_population_timestep(bbh, sbh, t, agn)
-        for i in active:
-            before = timeline.snapshot_bbh(bbh, i, t)
-            evolve_one_bbh_segment(...)
-            after_smooth = timeline.snapshot_bbh(bbh, i, t + dt)
-            timeline.record_smooth_segment(...)
-            if should_do_bsi(bbh, sbh, i, dt, rng_bsi):
-                before_bsi = timeline.snapshot_bbh(bbh, i, t + dt)
-                outcome = apply_bsi_event(...)
-                after_bsi = timeline.snapshot_bbh(bbh, i, t + dt)
-                timeline.record_bsi_event(...)
-            check_final_state_and_record(...)
-        t += dt
-    timeline.record_population_end(...)
-    return bbh, sbh, timeline
-```
-
-Current sample workflow:
-```python
-def run_physics_sample(...):
-    environment = make_environment(...)
-    population = make_trap_population(...)
-    run = evolve_trap_runtime(...)
-    for record in run.records:
-        payload = generation_data(...)
-        save_generation_to_file(payload, ...)
-    return sample_manifest
-```
-
-Configuration boundary:
-
-- `ModelConfig` defines scenario switches and population-level model choices;
-- `BBHEvolverParams` defines reduced BBH integration policy such as timestep
-  seed fractions, merger-boundary tolerance, loop cap, track decimation, and
-  diagnostic GW probe frequencies.
 
 ### Detail evolution workflow
 
