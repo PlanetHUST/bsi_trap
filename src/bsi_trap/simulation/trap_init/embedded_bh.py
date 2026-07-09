@@ -12,7 +12,7 @@ from bsi_trap.simulation.state.models import (
 )
 from bsi_trap.constant.constant import Myr
 from bsi_trap.physics.stellar.nsc_population import number_enclosed_NSC, BH_fraction_NSC
-from bsi_trap.simulation.initial_conditions.sampling import sample_embedded_radius
+from bsi_trap.simulation.trap_init.sampling import sample_embedded_radius
 
 DEFAULT_STELLAR_CATALOG = (
     Path(__file__).resolve().parents[3] / "input" / "input_data.txt"

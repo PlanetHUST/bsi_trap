@@ -56,7 +56,7 @@ def _bsi_impact_parameter_cm(
     if model_config.bsi_eta <= 0.0:
         return 0.0
 
-    sma_cm = float(bbh.sma_cm[binary_idx])
+    sma_cm = float(bbh.sma_evolve_cm[binary_idx])
     binary_mass_msun = float(bbh.m1_msun[binary_idx] + bbh.m2_msun[binary_idx])
     if (
         not np.isfinite(sma_cm)

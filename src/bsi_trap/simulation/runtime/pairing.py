@@ -11,8 +11,8 @@ from bsi_trap.simulation.state.models import (
 )
 from bsi_trap.simulation.config.model_config import ModelConfig
 from bsi_trap.physics.trap.context import build_trap_context
-from bsi_trap.simulation.initial_conditions.bbh_parameters import BBH_params_initialize
-from bsi_trap.simulation.initial_conditions.population import TrapPopulation
+from bsi_trap.simulation.trap_init.bbh_parameters import BBH_params_initialize
+from bsi_trap.simulation.trap_init.population import TrapPopulation
 from bsi_trap.simulation.runtime.singles import copy_singles_by_index
 from bsi_trap.simulation.timeline.models import PairingTimeline
 from bsi_trap.simulation.timeline.pairing import construct_pairing_step_timeline
@@ -54,9 +54,7 @@ def build_bbh_from_pairing(
     )
     bbh.chi1[primary_has_spin] = source_singles.chi[primary_idx][primary_has_spin]
     bbh.th1[primary_has_spin] = source_singles.theta[primary_idx][primary_has_spin]
-    bbh.chi2[secondary_has_spin] = source_singles.chi[secondary_idx][
-        secondary_has_spin
-    ]
+    bbh.chi2[secondary_has_spin] = source_singles.chi[secondary_idx][secondary_has_spin]
     bbh.th2[secondary_has_spin] = source_singles.theta[secondary_idx][
         secondary_has_spin
     ]

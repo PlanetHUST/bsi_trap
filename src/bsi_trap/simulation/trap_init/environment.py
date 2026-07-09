@@ -4,7 +4,7 @@ from bsi_trap.simulation.state.models import AGN_properties, DiskProfile
 from bsi_trap.simulation.config.model_config import ModelConfig
 from bsi_trap.physics.disk.pagn_adapter import build_pagn_disk_profile
 from bsi_trap.physics.trap.migration import find_catalog_median_reference_trap
-from bsi_trap.simulation.initial_conditions.embedded_bh import load_filtered_stellar_population
+from bsi_trap.simulation.trap_init.embedded_bh import load_filtered_stellar_population
 
 
 def make_environment(

@@ -10,9 +10,12 @@ from bsi_trap.simulation.state.models import (
     DiskProfile,
 )
 from bsi_trap.simulation.config.model_config import ModelConfig
-from bsi_trap.simulation.evolution.generation import EvolutionResult, evolve_single_binary
+from bsi_trap.simulation.evolution.generation import (
+    EvolutionResult,
+    evolve_single_binary,
+)
 from bsi_trap.physics.binary.tracks import finalize_bbh_tracks
-from bsi_trap.simulation.initial_conditions.population import TrapPopulation
+from bsi_trap.simulation.trap_init.population import TrapPopulation
 from bsi_trap.simulation.runtime.remnants import build_hierarchical_mergers
 from bsi_trap.simulation.runtime.singles import combine_single_populations
 from bsi_trap.simulation.runtime.state import (
@@ -27,8 +30,10 @@ from bsi_trap.simulation.timeline.evolution import construct_bbh_evolution_timel
 
 def binary_is_final(population: TrapPopulation) -> bool:
     bbh = population.binaries
+
     if bbh.num == 0:
         return True
+
     return bool(
         np.any(bbh.flags.merger_flag != 0) or np.any(bbh.flags.stop_reason_flag != 0)
     )
@@ -40,11 +45,13 @@ def advance_bbh_segment(
     model_config: ModelConfig,
     agn: AGN_properties,
     disk: DiskProfile,
-    active: ActiveBinary,
+    bbh_candi: ActiveBinary,
     boundary_s: float,
 ) -> float:
     """Advance an active BBH to a global boundary or to its physical stop."""
-    bbh = active.population.binaries
+
+    bbh = bbh_candi.population.binaries
+
     if bbh.num == 0:
         return float(boundary_s)
 
@@ -57,7 +64,9 @@ def advance_bbh_segment(
         0,
         segment_stop_s=boundary_s,
     )
+
     bbh.t_del_s[0] = t_del_s
+
     return float(bbh.t_ini_s[0] + bbh.t_del_s[0])
 
 
@@ -70,26 +79,32 @@ def predict_active_event_s(
     active_binaries: list[ActiveBinary],
     boundary_s: float,
 ) -> float | None:
+    """next active event"""
+
     event_times: list[float] = []
-    for active in active_binaries:
+
+    for bbh_candi in active_binaries:
         prediction = ActiveBinary(
-            record_index=active.record_index,
-            generation=active.generation,
-            population=deepcopy(active.population),
+            record_index=bbh_candi.record_index,
+            generation=bbh_candi.generation,
+            population=deepcopy(bbh_candi.population),
         )
+
         event_s = advance_bbh_segment(
             Evolparams=Evolparams,
             model_config=model_config,
             agn=agn,
             disk=disk,
-            active=prediction,
+            bbh_candi=prediction,
             boundary_s=boundary_s,
         )
+
         if binary_is_final(prediction.population) and event_s <= boundary_s:
             event_times.append(float(event_s))
 
     if not event_times:
         return None
+
     return min(event_times)
 
 
@@ -135,6 +150,7 @@ def advance_active_binaries(
     rng_orbit: np.random.Generator,
     boundary_s: float,
 ) -> None:
+
     remaining: list[ActiveBinary] = []
     for active in state.active_binaries:
         event_s = advance_bbh_segment(
@@ -142,7 +158,7 @@ def advance_active_binaries(
             model_config=model_config,
             agn=agn,
             disk=disk,
-            active=active,
+            bbh_candi=active,
             boundary_s=boundary_s,
         )
         if binary_is_final(active.population) and event_s <= boundary_s:

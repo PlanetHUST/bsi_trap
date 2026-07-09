@@ -7,7 +7,11 @@ from typing import Any, Callable
 
 import numpy as np
 
-from bsi_trap.simulation.state.models import AGN_properties, BBHEvolverParams, BBH_properties
+from bsi_trap.simulation.state.models import (
+    AGN_properties,
+    BBHEvolverParams,
+    BBH_properties,
+)
 from bsi_trap.constant import constant as const
 from bsi_trap.constant.stop_reason import StopReasons
 from bsi_trap.physics.binary import bsi
@@ -63,8 +67,8 @@ def _binary_state_from_bbh(bbh: BBH_properties, i: int) -> BinaryEvolutionState:
     return BinaryEvolutionState(
         m1_g=float(bbh.m1_msun[i] * const.msun),
         m2_g=float(bbh.m2_msun[i] * const.msun),
-        sma_cm=float(bbh.sma_cm[i]),
-        ecc=float(bbh.ecc[i]),
+        sma_cm=float(bbh.sma_evolve_cm[i]),
+        ecc=float(bbh.ecc_evolve[i]),
         delay_s=float(bbh.t_del_s[i]),
         ecc10=float(bbh.ecc10[i]),
         ecc0p1=float(bbh.ecc0p1[i]),
@@ -86,9 +90,8 @@ def _outside_merger_boundary(
     threshold_radius_cm: float,
 ) -> bool:
     return (
-        (sma_cm - threshold_radius_cm) / threshold_radius_cm
-        > params.merger_boundary_fraction
-    )
+        sma_cm - threshold_radius_cm
+    ) / threshold_radius_cm > params.merger_boundary_fraction
 
 
 def _update_frequency_probes(
@@ -284,8 +287,8 @@ def _record_final_state(
     final_time_s: float,
 ) -> None:
     recorder.record_final(final_time_s, state.sma_cm, state.ecc)
-    bbh.sma_cm[i] = state.sma_cm
-    bbh.ecc[i] = state.ecc
+    bbh.sma_evolve_cm[i] = state.sma_cm
+    bbh.ecc_evolve[i] = state.ecc
     bbh.ecc10[i] = state.ecc10
     bbh.ecc0p1[i] = state.ecc0p1
     append_bbh_track(
@@ -354,10 +357,7 @@ def evolve_binary_orbit(
             eccentricity,
         )
 
-    while (
-        _outside_merger_boundary(params, state.sma_cm, r_th)
-        and loop_num < max_loops
-    ):
+    while _outside_merger_boundary(params, state.sma_cm, r_th) and loop_num < max_loops:
         if stop_cond.stop_for_walltime(flags, i):
             break
 

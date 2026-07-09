@@ -14,8 +14,8 @@ add_src_to_path()
 from bsi_trap.simulation.config.model_config import ModelConfig
 from bsi_trap.simulation.config.rng import make_rng_streams, resolve_seed
 from bsi_trap.constant.constant import Myr
-from bsi_trap.simulation.initial_conditions.environment import make_environment
-from bsi_trap.simulation.initial_conditions.arrival import make_trap_arrival_state
+from bsi_trap.simulation.trap_init.environment import make_environment
+from bsi_trap.simulation.trap_init.arrival import sbh_trap_arrival_cal
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -75,7 +75,7 @@ def main() -> None:
     )
 
     agn, disk = make_environment(config, args.smbh_mass)
-    arrival_state = make_trap_arrival_state(
+    arrival_state = sbh_trap_arrival_cal(
         model_config=config,
         agn=agn,
         disk=disk,

@@ -6,7 +6,7 @@ from bsi_trap.simulation.state.models import (
     DiskProfile,
 )
 from bsi_trap.simulation.config.model_config import ModelConfig
-from bsi_trap.simulation.initial_conditions.sampling import (
+from bsi_trap.simulation.trap_init.sampling import (
     sample_bbh_ecc,
     sample_bbh_semimajor,
     sample_spin_values,
@@ -25,10 +25,10 @@ def BBH_params_initialize(
 ) -> None:
     """Initialize BBH semimajor axes, eccentricities, and component spins."""
     num = bbh.num
-    bbh.ecc = sample_bbh_ecc(num, rng_orbit)
-    bbh.sma_cm = sample_bbh_semimajor(agn, disk, bbh, rng_orbit)
-    bbh.sma_initial_cm = np.array(bbh.sma_cm, copy=True)
-    bbh.ecc_initial = np.array(bbh.ecc, copy=True)
+    bbh.ecc_evolve = sample_bbh_ecc(num, rng_orbit)
+    bbh.sma_evolve_cm = sample_bbh_semimajor(agn, disk, bbh, rng_orbit)
+    bbh.sma_initial_cm = np.array(bbh.sma_evolve_cm, copy=True)
+    bbh.ecc_initial = np.array(bbh.ecc_evolve, copy=True)
 
     if not preserve_existing_spins:
         bbh.chi1 = sample_spin_values(num, rng_spin)

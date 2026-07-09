@@ -93,8 +93,8 @@ def _validate_initial_binary(
 ) -> int | None:
     m1_g = float(bbh.m1_msun[i] * const.msun)
     m2_g = float(bbh.m2_msun[i] * const.msun)
-    a_cm = float(bbh.sma_cm[i])
-    e = float(bbh.ecc[i])
+    a_cm = float(bbh.sma_evolve_cm[i])
+    e = float(bbh.ecc_evolve[i])
     t_ini_s = float(bbh.t_ini_s[i])
 
     if (

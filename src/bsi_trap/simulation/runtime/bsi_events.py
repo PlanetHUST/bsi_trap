@@ -9,7 +9,7 @@ from bsi_trap.simulation.state.models import (
 )
 from bsi_trap.simulation.config.model_config import ModelConfig
 from bsi_trap.physics.binary.bsi import binary_single_rate_s_inv
-from bsi_trap.simulation.runtime.state import ActiveBinary, RuntimeEvent
+from bsi_trap.simulation.runtime.state import ActiveBinary, EventLog_binary
 from bsi_trap.simulation.timeline.models import FloatArray
 
 
@@ -36,7 +36,7 @@ def sample_next_bsi_event(
     current_time_s: float,
     step_end_s: float,
     rng_orbit: np.random.Generator,
-) -> RuntimeEvent | None:
+) -> EventLog_binary | None:
 
     if (
         not model_config.bsi_enabled
@@ -50,7 +50,7 @@ def sample_next_bsi_event(
         current_time_s,
     )
 
-    candidates: list[RuntimeEvent] = []
+    candidates: list[EventLog_binary] = []
     for active_index, active in enumerate(active_binaries):
         bbh = active.population.binaries
         for binary_idx in range(bbh.num):
@@ -79,9 +79,9 @@ def sample_next_bsi_event(
 
             if current_time_s < event_s < step_end_s:
                 candidates.append(
-                    RuntimeEvent(
+                    EventLog_binary(
                         kind="bsi",
-                        time_s=event_s,
+                        current_time_s=event_s,
                         generation=active.generation,
                         record_index=active.record_index,
                         live_single_count=int(live_singles.num),
@@ -93,12 +93,12 @@ def sample_next_bsi_event(
 
     if not candidates:
         return None
-    return min(candidates, key=lambda event: event.time_s)
+    return min(candidates, key=lambda event: event.current_time_s)
 
 
-def prime_bsi_event(active: ActiveBinary, event: RuntimeEvent) -> None:
+def prime_bsi_event(active: ActiveBinary, event: EventLog_binary) -> None:
     bbh = active.population.binaries
-    event_delay_s = float(event.time_s - bbh.t_ini_s[event.binary_idx])
+    event_delay_s = float(event.current_time_s - bbh.t_ini_s[event.binary_idx])
     if not np.isfinite(event_delay_s) or event_delay_s < 0.0:
         raise ValueError("Runtime BSI event cannot precede BBH formation")
     bbh.bsi_timescale_s[event.binary_idx] = event_delay_s

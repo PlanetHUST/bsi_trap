@@ -163,6 +163,54 @@ class Embedded_BH(object):
         self.R_cm = R_cm
 
 
+class Arrive_timeline(object):
+    def __init__(self, treach_s: np.ndarray, m_sun: np.ndarray) -> None:
+        self.treach_s = treach_s
+        self.m_sun = m_sun
+        self.num: int = len(treach_s)
+        self.gen_array: np.ndarray = np.ones_like(self.num, dtype=int)
+
+
+class BBH_snapshot(object):
+
+    def __init__(self, current_time_s: float, num: int) -> None:
+        self.current_time_s = current_time_s
+        self.num = num
+        self.bbh_collect = BBH_properties(num)
+
+    def append_bbh(self, bbh):
+        pass
+
+    def delete_bbh(self, index):
+        pass
+
+
+class Remants_snapshot(object):
+
+    def __init__(self, current_time_s: float, num: int) -> None:
+        self.current_time_s = current_time_s
+        self.mrem_msun = np.zeros(num, float)  # mass of merger remnant
+        self.chirem = np.zeros(num, float)
+        self.vk_cgs = np.zeros(num, float)  # kick velocity
+
+    def append_rem(self, remnant):
+        pass
+
+    def delete_rem(self, index):
+        pass
+
+
+class SBH_original_snapshot(object):
+
+    def __init__(self, current_time_s: float, num: int):
+        self.current_time_s = current_time_s
+        self.num = num
+        self.sbh_collect = Single_BH_properties(num)
+
+    def delete_sbh(self, index):
+        pass
+
+
 class BBH_properties(object):
     """BBH population in the trap"""
 
@@ -173,8 +221,8 @@ class BBH_properties(object):
         self.m2_msun = np.zeros(num, float)
         self.sma_initial_cm = np.full(num, np.nan, float)  # for copies
         self.ecc_initial = np.full(num, np.nan, float)  # for copies
-        self.sma_cm = np.zeros(num, float)
-        self.ecc = np.zeros(num, float)
+        self.sma_evolve_cm = np.zeros(num, float)
+        self.ecc_evolve = np.zeros(num, float)
 
         self.ecc10 = np.zeros(num, float)  # eccentricity at fGW=10 Hz
         self.ecc0p1 = np.zeros(num, float)  # eccentricity at fGW=0.1 Hz
@@ -186,64 +234,61 @@ class BBH_properties(object):
 
         self.A_cm = np.zeros(num, float)  # outer orbital semimajor axis in cm
 
-        self.mrem_msun = np.zeros(num, float)  # mass of merger remnant
-        self.mmerg = self.mrem_msun
-        self.chirem = np.zeros(num, float)
-        self.chimerg = self.chirem
-        self.vk_cgs = np.zeros(num, float)  # kick velocity
-        self.generation = np.zeros(num, dtype=np.int64)
+        # self.mrem_msun = np.zeros(num, float)  # mass of merger remnant
+        # self.mmerg = self.mrem_msun
+        # self.chirem = np.zeros(num, float)
+        # self.chimerg = self.chirem
+        # self.vk_cgs = np.zeros(num, float)  # kick velocity
+        # self.generation = np.zeros(num, dtype=np.int64)
 
-        self.t_ini_s = np.zeros(num, float)
-        self.t_del_s = np.zeros(num, float)
+        # self.t_ini_s = np.zeros(num, float)
+        # self.t_del_s = np.zeros(num, float)
 
-        self.bsi_timescale_s = np.full(num, np.nan, float)
-        self.bsi_applied_flag = np.zeros(num, int)
-        self.bsi_weak_count = np.zeros(num, int)
-        self.bsi_delta_e_total = np.zeros(num, float)
-        self.bsi_delta_theta_total = np.zeros(num, float)
-        self.track_binary_idx = np.empty(0, dtype=np.int64)
-        self.track_step_idx = np.empty(0, dtype=np.int64)
-        self.track_time_s = np.empty(0, dtype=np.float64)
-        self.track_sma_cm = np.empty(0, dtype=np.float64)
-        self.track_ecc = np.empty(0, dtype=np.float64)
+        # self.bsi_timescale_s = np.full(num, np.nan, float)
+        # self.bsi_applied_flag = np.zeros(num, int)
+        # self.bsi_weak_count = np.zeros(num, int)
+        # self.bsi_delta_e_total = np.zeros(num, float)
+        # self.bsi_delta_theta_total = np.zeros(num, float)
+        # self.track_binary_idx = np.empty(0, dtype=np.int64)
+        # self.track_step_idx = np.empty(0, dtype=np.int64)
+        # self.track_time_s = np.empty(0, dtype=np.float64)
+        # self.track_sma_cm = np.empty(0, dtype=np.float64)
+        # self.track_ecc = np.empty(0, dtype=np.float64)
 
-        self._track_binary_idx_chunks: list[IntArray] = []
-        self._track_step_idx_chunks: list[IntArray] = []
-        self._track_time_s_chunks: list[FloatArray] = []
-        self._track_sma_cm_chunks: list[FloatArray] = []
-        self._track_ecc_chunks: list[FloatArray] = []
-        self.flags = BBH_flags(num)
+        # self._track_binary_idx_chunks: list[IntArray] = []
+        # self._track_step_idx_chunks: list[IntArray] = []
+        # self._track_time_s_chunks: list[FloatArray] = []
+        # self._track_sma_cm_chunks: list[FloatArray] = []
+        # self._track_ecc_chunks: list[FloatArray] = []
+        # self.flags = BBH_flags(num)
 
-    @property
-    def formation_s(self) -> FloatArray:
-        """Absolute BBH formation time."""
-        return self.t_ini_s
+    # @property
+    # def formation_s(self) -> FloatArray:
+    #     """Absolute BBH formation time."""
+    #     return self.t_ini_s
 
-    @formation_s.setter
-    def formation_s(self, values: npt.ArrayLike) -> None:
-        self.t_ini_s = np.asarray(values, dtype=float)
+    # @formation_s.setter
+    # def formation_s(self, values: npt.ArrayLike) -> None:
+    #     self.t_ini_s = np.asarray(values, dtype=float)
 
 
 class Single_BH_properties(object):
     "single BH population properties in the trap"
 
-    def __init__(self, num):
+    def __init__(self, num: int):
         self.num = num
         self.m_msun = np.zeros(num, float)
         self.t_ini_s = np.zeros(num, float)
-        self.chi = np.full(num, np.nan, float)
-        self.theta = np.full(num, np.nan, float)
         self.r_pair_cm = np.full(num, np.nan, float)
-        self.generation = np.zeros(num, dtype=np.int64)
 
-    @property
-    def available_from_s(self) -> FloatArray:
-        """Absolute time when each single BH is available in the trap."""
-        return self.t_ini_s
+    # @property
+    # def available_from_s(self) -> FloatArray:
+    #     """Absolute time when each single BH is available in the trap."""
+    #     return self.t_ini_s
 
-    @available_from_s.setter
-    def available_from_s(self, values: npt.ArrayLike) -> None:
-        self.t_ini_s = np.asarray(values, dtype=float)
+    # @available_from_s.setter
+    # def available_from_s(self, values: npt.ArrayLike) -> None:
+    #     self.t_ini_s = np.asarray(values, dtype=float)
 
 
 class BBHEvolverParams:

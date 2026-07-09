@@ -14,7 +14,7 @@ from bsi_trap.simulation.config.model_config import ModelConfig
 from bsi_trap.constant import constant as const
 from bsi_trap.simulation.timeline.models import EvolutionTimeline
 from bsi_trap.simulation.runtime.remnants import HierarchicalMergerLedger
-from bsi_trap.simulation.initial_conditions.population import TrapPopulation
+from bsi_trap.simulation.trap_init.population import TrapPopulation
 
 from .contract import HDF5Contract
 
@@ -68,10 +68,10 @@ def bbh_data(
         "Aini": bbh.A_cm,
         "sma_initial": bbh.sma_initial_cm,
         "ecc_initial": bbh.ecc_initial,
-        "sma": bbh.sma_cm,
-        "sma_final": bbh.sma_cm,
-        "ecc": bbh.ecc,
-        "ecc_final": bbh.ecc,
+        "sma": bbh.sma_evolve_cm,
+        "sma_final": bbh.sma_evolve_cm,
+        "ecc": bbh.ecc_evolve,
+        "ecc_final": bbh.ecc_evolve,
         "ecc10": bbh.ecc10,
         "ecc0p1": bbh.ecc0p1,
         "th1": bbh.th1,
@@ -115,8 +115,10 @@ def time_data(
     bsi_event_time_s = np.full(num, np.nan, dtype=float)
     bsi_delay_s = np.asarray(bbh.bsi_timescale_s, dtype=float)
     bsi_applied = (
-        np.asarray(bbh.flags.bsi_event_flag, dtype=int) != 0
-    ) & np.isfinite(bsi_delay_s) & (bsi_delay_s >= 0.0)
+        (np.asarray(bbh.flags.bsi_event_flag, dtype=int) != 0)
+        & np.isfinite(bsi_delay_s)
+        & (bsi_delay_s >= 0.0)
+    )
     bsi_event_time_s[bsi_applied] = bbh.t_ini_s[bsi_applied] + bsi_delay_s[bsi_applied]
     return {
         "tform_myr": _nan(num),
@@ -253,9 +255,11 @@ def sample_manifest(
         "merger_count": int(merger_count),
         "evolved_binary_count": int(evolved_binary_count),
         "output_file": str(output_file),
-        "generation_files": [str(path) for path in generation_files]
-        if generation_files is not None
-        else [str(output_file)],
+        "generation_files": (
+            [str(path) for path in generation_files]
+            if generation_files is not None
+            else [str(output_file)]
+        ),
         "model_config": model_config.to_dict(),
         "process_id": os.getpid(),
         "completion_time": time.time(),
@@ -271,28 +275,38 @@ def sample_manifest(
             "evolved_binary_count": int(timeline.size),
             "merger_count": int(merger_count),
             "nonmerger_count": int(timeline.size - merger_count),
-            "mean_delay_myr": float(np.nanmean(timeline.delay_s) / const.Myr)
-            if timeline.size > 0
-            else float("nan"),
+            "mean_delay_myr": (
+                float(np.nanmean(timeline.delay_s) / const.Myr)
+                if timeline.size > 0
+                else float("nan")
+            ),
         },
         "hierarchical_mergers": {
-            "remnant_count": int(state.hierarchical_mergers.size)
-            if state.hierarchical_mergers is not None
-            else 0,
-            "retained_count": int(state.hierarchical_mergers.retained_count)
-            if state.hierarchical_mergers is not None
-            else 0,
-            "escaped_count": int(state.hierarchical_mergers.escaped_count)
-            if state.hierarchical_mergers is not None
-            else 0,
-            "trap_overloaded_count": int(
-                state.hierarchical_mergers.trap_overloaded_count
-            )
-            if state.hierarchical_mergers is not None
-            else 0,
-            "recycled_count": int(state.hierarchical_mergers.recycled_count)
-            if state.hierarchical_mergers is not None
-            else 0,
+            "remnant_count": (
+                int(state.hierarchical_mergers.size)
+                if state.hierarchical_mergers is not None
+                else 0
+            ),
+            "retained_count": (
+                int(state.hierarchical_mergers.retained_count)
+                if state.hierarchical_mergers is not None
+                else 0
+            ),
+            "escaped_count": (
+                int(state.hierarchical_mergers.escaped_count)
+                if state.hierarchical_mergers is not None
+                else 0
+            ),
+            "trap_overloaded_count": (
+                int(state.hierarchical_mergers.trap_overloaded_count)
+                if state.hierarchical_mergers is not None
+                else 0
+            ),
+            "recycled_count": (
+                int(state.hierarchical_mergers.recycled_count)
+                if state.hierarchical_mergers is not None
+                else 0
+            ),
         },
     }
 
