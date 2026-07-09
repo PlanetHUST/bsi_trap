@@ -1,4 +1,5 @@
-from bsi_trap.parallel_compute.logging_config import configure_logging
-from bsi_trap.parallel_compute.manager import ParallelSimulationManager
+"""Simple local multi-CPU helper for desktop demo runs."""
 
-__all__ = ["ParallelSimulationManager", "configure_logging"]
+from bsi_trap.parallel_compute.desktop import parallel_map
+
+__all__ = ["parallel_map"]

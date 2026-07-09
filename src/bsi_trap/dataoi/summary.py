@@ -1,99 +1,87 @@
+"""Text summaries for the compact demo."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
-
-import h5py
 import numpy as np
 
-from .contract import HDF5Contract
+from bsi_trap.simulation import DemoResult
+from bsi_trap.units import MYR, PC
 
 
-@dataclass(frozen=True)
-class GenerationSummary:
-    sample_index: int
-    generation: int
-    smbh_mass_msun: float
-    bbh_count: int
-    merger_count: int
-    embedded_count: int
-    single_count: int
-    pairing_event_count: int
-    m1_msun: np.ndarray
-    m2_msun: np.ndarray
-    sma_initial_cm: np.ndarray
-    sma_cm: np.ndarray
-    ecc_initial: np.ndarray
-    ecc: np.ndarray
-    tdel_myr: np.ndarray
-    tini_myr: np.ndarray
-    tmerg_myr: np.ndarray
-    merged: np.ndarray
+def _myr(seconds: float | np.ndarray) -> float | np.ndarray:
+    return seconds / MYR
 
 
-def _array(h5f: h5py.File, path: str, dtype: type = float) -> np.ndarray:
-    node = h5f.get(path)
-    if not isinstance(node, h5py.Dataset):
-        return np.asarray([], dtype=dtype)
-    return np.asarray(node[()], dtype=dtype)
+def _pc(cm: float | np.ndarray) -> float | np.ndarray:
+    return cm / PC
 
 
-def _count(h5f: h5py.File, path: str) -> int:
-    node = h5f.get(path)
-    if not isinstance(node, h5py.Dataset):
-        return 0
-    return int(np.asarray(node[()]).size)
+def format_summary(result: DemoResult, *, preview: int = 5) -> str:
+    config = result.config
+    disk = result.disk
+    arrivals = result.arrivals
+    pairing = result.pairing
+    evolution = result.evolution
 
+    lines = [
+        "BSI trap demo",
+        f"  seed: {config.seed}",
+        f"  SMBH mass [Msun]: {config.smbh_mass_msun:.6g}",
+        f"  AGN lifetime [Myr]: {config.agn_lifetime_myr:.6g}",
+        f"  disk model: {config.disk_model}",
+        f"  disk cells: {disk.radius_cm.size}",
+        f"  trap radius [pc]: {_pc(disk.r_trap_cm):.6e}",
+        f"  trap Q: {disk.trap_q:.6g}",
+        f"  trap H/R: {disk.h_over_r[disk.trap_index]:.6g}",
+        f"  sampled embedded BHs: {result.population.size}",
+        f"  reached trap: {arrivals.reached_count}",
+        f"  BBHs formed: {pairing.size}",
+        f"  BBHs merged: {evolution.merger_count}",
+        f"  BSI events: {evolution.bsi_count}",
+        f"  remaining trap singles: {result.single_count}",
+    ]
 
-def _int_attr(h5f: h5py.File, name: str, default: int) -> int:
-    value = h5f.attrs.get(name, default)
-    return int(np.asarray(value).item())
+    shown_arrivals = min(max(preview, 0), arrivals.order.size)
+    if shown_arrivals:
+        lines.append(f"  first {shown_arrivals} arrivals:")
+        for index in arrivals.order[:shown_arrivals]:
+            lines.append(
+                "    "
+                f"idx={int(index):04d} "
+                f"t={float(_myr(arrivals.arrival_s[index])):.4f} Myr "
+                f"m={result.population.mass_msun[index]:.3f} Msun "
+                f"R0={float(_pc(result.population.initial_radius_cm[index])):.3e} pc"
+            )
 
+    shown_pairs = min(max(preview, 0), pairing.size)
+    if shown_pairs:
+        lines.append(f"  first {shown_pairs} BBH formations:")
+        for row in range(shown_pairs):
+            first = int(pairing.first_idx[row])
+            second = int(pairing.second_idx[row])
+            lines.append(
+                "    "
+                f"({first:04d},{second:04d}) "
+                f"t_form={float(_myr(pairing.formation_s[row])):.4f} Myr "
+                f"delay={float(_myr(pairing.pair_delay_s[row])):.4e} Myr "
+                f"m=({result.population.mass_msun[first]:.3f},"
+                f"{result.population.mass_msun[second]:.3f}) Msun"
+            )
 
-def _float_attr(h5f: h5py.File, name: str, default: float) -> float:
-    value = h5f.attrs.get(name, default)
-    return float(np.asarray(value).item())
+    shown_mergers = min(max(preview, 0), evolution.merger_count)
+    if shown_mergers:
+        rows = np.flatnonzero(evolution.merged)[:shown_mergers]
+        lines.append(f"  first {shown_mergers} BBH mergers:")
+        for row in rows:
+            row = int(row)
+            lines.append(
+                "    "
+                f"bbh={row:04d} "
+                f"t_merge={float(_myr(evolution.merger_s[row])):.4f} Myr "
+                f"delay={float(_myr(evolution.delay_s[row])):.4e} Myr "
+                f"channel={evolution.channel[row]} "
+                f"Mf={evolution.final_mass_msun[row]:.3f} Msun "
+                f"chif={evolution.final_spin[row]:.3f}"
+            )
 
-
-def read_generation_summary(
-    path: str | Path,
-    contract: HDF5Contract = HDF5Contract(),
-) -> GenerationSummary:
-    file_path = Path(path)
-    with h5py.File(file_path, "r") as h5f:
-        bbh_group = contract.group_bbh
-        flags_group = contract.group_flags
-        times_group = contract.group_timescales
-        trap_group = contract.group_trap_population
-
-        m1 = _array(h5f, f"{bbh_group}/m1")
-        m2 = _array(h5f, f"{bbh_group}/m2")
-        merged = _array(h5f, f"{flags_group}/merger_flag", dtype=int).astype(bool)
-
-        return GenerationSummary(
-            sample_index=_int_attr(h5f, contract.attr_sample_index, -1),
-            generation=_int_attr(h5f, contract.attr_generation, -1),
-            smbh_mass_msun=_float_attr(
-                h5f,
-                contract.attr_smbh_mass_msun,
-                np.nan,
-            ),
-            bbh_count=int(m1.size),
-            merger_count=int(np.count_nonzero(merged)),
-            embedded_count=_count(h5f, f"{trap_group}/embedded_bh/m_msun"),
-            single_count=_count(h5f, f"{trap_group}/singles/m_msun"),
-            pairing_event_count=_count(
-                h5f,
-                f"{trap_group}/pairing_timeline/formation_s",
-            ),
-            m1_msun=m1,
-            m2_msun=m2,
-            sma_initial_cm=_array(h5f, f"{bbh_group}/sma_initial"),
-            sma_cm=_array(h5f, f"{bbh_group}/sma"),
-            ecc_initial=_array(h5f, f"{bbh_group}/ecc_initial"),
-            ecc=_array(h5f, f"{bbh_group}/ecc"),
-            tdel_myr=_array(h5f, f"{times_group}/tdel_myr"),
-            tini_myr=_array(h5f, f"{times_group}/tini_myr"),
-            tmerg_myr=_array(h5f, f"{times_group}/tmerg_myr"),
-            merged=merged,
-        )
+    return "\n".join(lines)

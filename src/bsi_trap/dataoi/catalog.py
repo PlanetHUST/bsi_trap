@@ -1,52 +1,33 @@
-# bsi_trap/storage/catalog.py
+"""Catalog loading for the compact demo."""
 
 from __future__ import annotations
 
-import h5py
+from pathlib import Path
+
 import numpy as np
 
-from .contract import HDF5Contract
+DEFAULT_CATALOG = Path(__file__).resolve().parents[3] / "input" / "input_data.txt"
 
 
-def _int_attr(group: h5py.Group, name: str, default: int) -> int:
-    value = group.attrs.get(name, default)
-    return int(np.asarray(value).item())
-
-
-def _float_attr(group: h5py.Group, name: str, default: float) -> float:
-    value = group.attrs.get(name, default)
-    return float(np.asarray(value).item())
-
-
-def write_sample_catalog(
+def load_remnant_masses(
+    catalog_path: Path = DEFAULT_CATALOG,
     *,
-    f_out: h5py.File,
-    samples_group: h5py.Group,
-    contract: HDF5Contract,
-) -> None:
-    catalog = f_out.create_group(contract.group_catalog)
+    max_rows: int | None = 50_000,
+) -> np.ndarray:
+    """Load remnant masses from the local stellar-remnant catalog."""
+    if not catalog_path.exists():
+        raise FileNotFoundError(f"Remnant catalog not found: {catalog_path}")
 
-    sample_names = sorted(samples_group.keys())
-
-    catalog.attrs["num_samples"] = len(sample_names)
-    catalog.attrs["sample_names"] = np.asarray(sample_names, dtype="S")
-
-    sample_indices = []
-    process_ids = []
-    smbh_masses = []
-
-    for sample_name in sample_names:
-        node = samples_group[sample_name]
-        if not isinstance(node, h5py.Group):
-            continue
-        sample_group = node
-
-        sample_indices.append(_int_attr(sample_group, contract.attr_sample_index, -1))
-        process_ids.append(_int_attr(sample_group, contract.attr_process_id, -1))
-        smbh_masses.append(
-            _float_attr(sample_group, contract.attr_smbh_mass_msun, np.nan)
-        )
-
-    catalog.create_dataset("sample_index", data=np.asarray(sample_indices, dtype=int))
-    catalog.create_dataset("process_id", data=np.asarray(process_ids, dtype=int))
-    catalog.create_dataset("smbh_mass_msun", data=np.asarray(smbh_masses, dtype=float))
+    masses = np.loadtxt(
+        catalog_path,
+        usecols=(2,),
+        skiprows=3,
+        max_rows=max_rows,
+        dtype=float,
+        ndmin=1,
+    ).reshape(-1)
+    keep = np.isfinite(masses) & (masses > 0.0) & (masses <= 80.0)
+    masses = masses[keep]
+    if masses.size == 0:
+        raise ValueError(f"No usable remnant masses found in {catalog_path}")
+    return masses
