@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from bsi_trap.dataoi.catalog import DEFAULT_CATALOG
-from bsi_trap.simulation.models import DemoConfig, DemoResult
+from bsi_trap.simulation.models import DemoConfig, DemoResult, BinaryCollect
 from bsi_trap.units import MYR
 
 
@@ -42,7 +42,7 @@ def run_simulation(
     config: DemoConfig,
     *,
     catalog_path: Path = DEFAULT_CATALOG,
-) -> DemoResult:
+):
     """Run the compact path: disk -> population -> pair-up -> BBH evolution."""
     validate_config(config)
 
@@ -60,32 +60,10 @@ def run_simulation(
     arrivals = construct_arrivals(config, disk, population)
     current_time_s = 0
     end_time_s = config.agn_lifetime_myr * MYR
+    bbh_list = BinaryCollect(current_time_s)
 
     while current_time_s < end_time_s:
-        pairing, paired_mask = pairing_kernal(
-            current_time_s,
-            config,
-            disk,
-            population,
-            arrivals,
-        )
-        binaries, evolution = evolve_kernal(
-            config,
-            disk,
-            population,
-            arrivals,
-            pairing,
-        )
-    return DemoResult(
-        config,
-        disk,
-        population,
-        arrivals,
-        pairing,
-        binaries,
-        evolution,
-        paired_mask,
-    )
+        pairing_kernal(current_time_s, config, disk, arrivals, bbh_list, rng)
 
 
 __all__ = ["run_simulation", "validate_config"]

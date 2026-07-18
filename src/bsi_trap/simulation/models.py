@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -71,7 +71,7 @@ class EmbeddedPopulation:
         return int(self.mass_msun.size)
 
 
-@dataclass(frozen=True)
+@dataclass
 class ArrivalTimeline:
     arrival_s: np.ndarray
     mass_msun: np.ndarray
@@ -87,6 +87,12 @@ class ArrivalTimeline:
         select_order = self.order[select_mask]
         return select_order.min()
 
+    def pop_ind(self, ind: int) -> None:
+        self.arrival_s = np.delete(self.arrival_s, ind)
+        self.mass_msun = np.delete(self.mass_msun, ind)
+        self.reached_mask = np.delete(self.reached_mask, ind)
+        self.order = np.delete(self.order, ind)
+
 
 @dataclass(frozen=True)
 class PairingTimeline:
@@ -101,19 +107,35 @@ class PairingTimeline:
         return int(self.formation_s.size)
 
 
-@dataclass(frozen=True)
+@dataclass
 class BinaryPopulation:
-    first_idx: np.ndarray
-    second_idx: np.ndarray
-    m1_msun: np.ndarray
-    m2_msun: np.ndarray
-    semi_major_axis_cm: np.ndarray
-    eccentricity: np.ndarray
-    formation_s: np.ndarray
+    first_idx: int
+    second_idx: int
+    m1_msun: float
+    m2_msun: float
+    sma_cm: float = 0
+    ecc: float = 0
+    time_ini_s: float = 0
+
+    def ini_param(self, sma_cm: float, ecc: float, time_ini_s: float):
+        self.sma_cm = sma_cm
+        self.ecc = ecc
+
+
+@dataclass
+class BinaryCollect:
+    current_time_s: float
+    bbh_list: list[BinaryPopulation] = field(default_factory=list)
 
     @property
-    def size(self) -> int:
-        return int(self.formation_s.size)
+    def count(self):
+        return len(self.bbh_list)
+
+    def append(self, bbh: BinaryPopulation):
+        self.bbh_list.append(bbh)
+
+    def pop(self, ind: int = -1):
+        self.bbh_list.pop(ind)
 
 
 @dataclass(frozen=True)

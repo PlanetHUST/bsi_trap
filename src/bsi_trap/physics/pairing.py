@@ -8,8 +8,8 @@ from bsi_trap.simulation.models import (
     ArrivalTimeline,
     DemoConfig,
     DiskProfile,
-    EmbeddedPopulation,
-    PairingTimeline,
+    BinaryPopulation,
+    BinaryCollect,
 )
 from bsi_trap.units import G, MSUN, MYR
 
@@ -41,10 +41,10 @@ def pairing_kernal(
     current_time_s: float,
     config: DemoConfig,
     disk: DiskProfile,
-    population: EmbeddedPopulation,
     arrivals: ArrivalTimeline,
+    bbh_list: BinaryCollect,
     rng: np.random.Generator,
-) -> tuple[PairingTimeline, np.ndarray]:
+):
     end_s = config.agn_lifetime_myr * MYR
     arrived_inds = []
 
@@ -57,19 +57,33 @@ def pairing_kernal(
         if len(arrived_inds) < 2:
             current_time_s = arrivals.arrival_s[next_arrival_ind]
             continue
-        first_one = rng.choice(arrived_inds)
-        second_one = rng.choice(arrived_inds)
+        first_ind = rng.choice(len(arrived_inds))
+        second_ind = rng.choice(len(arrived_inds))
+        while second_ind == first_ind:
+            second_ind = rng.choice(len(arrived_inds))
+        first_mass_msun = arrivals.mass_msun[first_ind]
+        second_mass_msun = arrivals.mass_msun[second_ind]
         pair_value = cal_pair_value(
             config,
             disk,
-            arrivals.mass_msun[first_one],
-            arrivals.mass_msun[second_one],
+            first_mass_msun,
+            second_mass_msun,
             rng,
         )
         pair_flag = pair_value > 0.9
         current_time_s += pair_delay_s(
             disk,
+            first_mass_msun,
+            second_mass_msun,
         )
+
+    if not pair_flag:
+        print("no pair till end_s")
+    else:
+        arrivals.pop_ind(first_ind)
+        arrivals.pop_ind(second_ind)
+        bbh = BinaryPopulation(first_ind, second_ind, first_mass_msun, second_mass_msun)
+        bbh_list.append(bbh)
 
 
 __all__ = ["pairing_kernal", "pair_delay_s"]
