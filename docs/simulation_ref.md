@@ -25,7 +25,7 @@ This project simulates the **Binary-Single Interaction (BSI)** dynamics of stell
 - Each embedded BH migrates inward due to disk torques.
 - **Arrival time** at the trap is mass-dependent: more massive BHs migrate faster.
 - BHs that arrive within the AGN duty cycle are marked as "reached" and sorted by arrival time.
-- Simple migration timescale: $t_mig = M_{\bullet}^2h^2/(m\Sigma r^2 \Omega)$.
+- Simple migration timescale: $t_{\rm mig} = M_{\bullet}^2h^2/(m\Sigma r^2 \Omega)$.
 
 
 ### 4. Pair-Up into Binaries (`physics/pairing.py`)
@@ -35,7 +35,7 @@ This project simulates the **Binary-Single Interaction (BSI)** dynamics of stell
   $$
   t_{\rm pair} = 3 c_s^3 / (4\pi·G^2·\rho·(m_1 + m_2))
   $$
-  where $rho$ is the midplane gas density at the trap.
+  where $\rho$ is the midplane gas density at the trap.
 - Pairing is stochastic: random selection from arrived singles, with a Hill-radius-weighted acceptance criterion.
 - no longer useing an **instant pair-up** assumption — the secondary's origin needs to be tracked explicitly.
 

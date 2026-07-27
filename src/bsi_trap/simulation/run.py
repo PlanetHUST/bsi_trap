@@ -65,5 +65,9 @@ def run_simulation(
     while current_time_s < end_time_s:
         pairing_kernal(current_time_s, config, disk, arrivals, bbh_list, rng)
 
+    return DemoResult(
+        config, disk, population, arrivals, pairing, binaries, evolution, paired_mask
+    )
+
 
 __all__ = ["run_simulation", "validate_config"]
