@@ -1,4 +1,8 @@
 # Physical Scenario
+
+> Historical design notes. The reconstructed production path and current
+> conventions are documented in `simulation_ref.md`; source and tests are
+> authoritative where this early outline differs.
 ## Initialization of disk embedded BHs
 ### population characteristics
 ignore the maybe impact of damping population of embedded BHs

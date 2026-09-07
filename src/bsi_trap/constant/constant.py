@@ -1,18 +1,19 @@
-"""Small CGS constants module kept for simple imports."""
+"""Compatibility aliases for the authoritative constants in ``bsi_trap.units``."""
 
 from bsi_trap.constant.stop_reason import StopReasons
+from bsi_trap.units import AU_CM, C_CM_S, G_CGS, MSUN_G, MYR_S, PC_CM, YEAR_S
 
 tHubble = 13.6e3
-parsec = 3.08568e18
-msun = 1.98892e33
-AU = 1.495978707e13
+parsec = PC_CM
+msun = MSUN_G
+AU = AU_CM
 Rsun = 6.95700e10
-G = 6.6743015e-8
-c = 2.99792458e10
+G = G_CGS
+c = C_CM_S
 c5 = c**5
 G3 = G**3
-yr = 3.1557600e7
-Myr = 1.0e6 * yr
+yr = YEAR_S
+Myr = MYR_S
 
 STOP_HUBBLE_LIMIT = StopReasons.STOP_HUBBLE_LIMIT
 STOP_INTEGRATION_LIMIT = StopReasons.STOP_INTEGRATION_LIMIT

@@ -8,6 +8,8 @@
     ],
     "typeCheckingMode": "basic",
     "pythonVersion": "3.11",
+    "venvPath": "/home/planet/miniconda3/envs",
+    "venv": "sevnpy_env",
     "reportMissingImports": "warning",
     "reportMissingTypeStubs": "none"
 }

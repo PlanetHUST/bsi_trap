@@ -8,26 +8,34 @@ configuration -> disk -> embedded population -> trap arrivals -> pair-up timelin
 
 from bsi_trap.simulation.models import (
     ArrivalTimeline,
+    BSIRecord,
     BinaryPopulation,
+    BinaryState,
     DemoConfig,
     DemoResult,
     DiskProfile,
     EmbeddedPopulation,
-    EvolutionTimeline,
-    PairingTimeline,
+    MergerRecord,
+    PairingRecord,
+    SimulationResult,
+    SimulationState,
 )
 from bsi_trap.simulation.run import run_simulation, validate_config
 
 
 __all__ = [
     "ArrivalTimeline",
+    "BSIRecord",
     "BinaryPopulation",
+    "BinaryState",
     "DemoConfig",
     "DemoResult",
     "DiskProfile",
     "EmbeddedPopulation",
-    "EvolutionTimeline",
-    "PairingTimeline",
+    "MergerRecord",
+    "PairingRecord",
+    "SimulationResult",
+    "SimulationState",
     "run_simulation",
     "validate_config",
 ]
